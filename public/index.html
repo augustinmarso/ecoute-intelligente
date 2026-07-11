@@ -341,6 +341,12 @@
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: var(--radius); font-size: 13px; z-index: 800; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
 
+  /* Barre de confirmation « Ajouter ce mot à Anki ? » (aucun ajout automatique) */
+  .word-offer { position: fixed; bottom: 68px; left: 50%; transform: translateX(-50%); z-index: 750; display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 16px; background: var(--bg); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); font-size: 14px; }
+  .word-offer .wo-text { font-family: var(--reading-font); white-space: nowrap; }
+  .word-offer .wo-text strong { color: var(--warning); }
+  .word-offer .btn-main { height: 30px; padding: 0 12px; font-size: 13px; flex-shrink: 0; }
+
   /* ---------- Vignette volante (capture) ---------- */
   .fly-thumb { position: fixed; z-index: 900; border-radius: 6px; box-shadow: var(--shadow); pointer-events: none; transition: transform .6s cubic-bezier(.3,.6,.4,1), opacity .6s ease; object-fit: cover; }
 
@@ -640,6 +646,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="word-offer" id="word-offer" hidden></div>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script src="common-words.js"></script>

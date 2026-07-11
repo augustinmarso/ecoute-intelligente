@@ -504,7 +504,8 @@ function wireReadyState(body) {
     span.addEventListener('click', () => {
       const word = span.dataset.word;
       if (!word) return;
-      window.addWordDirect(word, exCorrection.correction, 'Exercice');
+      // Pas d'ajout automatique : barre de confirmation « Ajouter à Anki ? »
+      window.offerWordToAnki(word, exCorrection.correction, 'Exercice');
     });
   });
 }

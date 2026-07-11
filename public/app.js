@@ -922,7 +922,8 @@ function isWordSeen(videoId, word) {
 
 // Clic sur un mot anglais : pause vidéo, traduction française affichée EN
 // PLACE dans la phrase (orange), retour au mot anglais après 8 s (le mot
-// reste orange), et ajout direct de la carte Anki. Pas de popup.
+// reste orange). AUCUN ajout automatique à Anki : une barre de confirmation
+// propose l'ajout, qui ne part qu'au clic sur « Ajouter ».
 function onWordClick(e, span) {
   e.stopPropagation();
   const raw = span.textContent;
@@ -932,12 +933,38 @@ function onWordClick(e, span) {
 
   if (ytPlayer && ytPlayer.pauseVideo) { try { ytPlayer.pauseVideo(); } catch (_) {} }
 
-  // Une seule requête dictionnaire, partagée entre l'affichage et l'ajout Anki.
+  // Une seule requête dictionnaire, partagée entre l'affichage et la proposition Anki.
   const lookupPromise = lookupWord(clean);
   showFrenchInPlace(span, raw, lookupPromise);
   markWordSeen(currentVideoId, clean);
-  addWordDirect(clean, currentSentence?.text || '', currentVideoMeta?.title || '', lookupPromise);
+  offerWordToAnki(clean, currentSentence?.text || '', currentVideoMeta?.title || '', lookupPromise);
 }
+
+// Barre de confirmation en bas de l'écran : « mot → traduction [Ajouter à Anki] ».
+// Remplacée si un autre mot est cliqué, disparaît après 10 s ou au clic sur ✕.
+let _offerTimer = null;
+async function offerWordToAnki(word, example, sourceTitle, lookupPromise) {
+  let data = null;
+  try { data = await (lookupPromise || lookupWord(word)); } catch (_) {}
+  if (!data || !data.translation) { showToast(`« ${word} » : pas de traduction au dictionnaire`); return; }
+
+  const bar = document.getElementById('word-offer');
+  bar.innerHTML = `
+    <span class="wo-text"><strong>${escapeHtml(word)}</strong> → ${escapeHtml(shortenFrTranslation(data.translation))}</span>
+    <button class="btn-main" id="wo-add">${icon('add', 14)} Ajouter à Anki</button>
+    <button class="icon-btn" id="wo-close" title="Non merci">${icon('close', 16)}</button>
+  `;
+  bar.hidden = false;
+  clearTimeout(_offerTimer);
+  _offerTimer = setTimeout(() => { bar.hidden = true; }, 10000);
+  document.getElementById('wo-close').onclick = () => { bar.hidden = true; };
+  document.getElementById('wo-add').onclick = async (ev) => {
+    ev.currentTarget.disabled = true;
+    await addWordDirect(word, example, sourceTitle, Promise.resolve(data));
+    bar.hidden = true;
+  };
+}
+window.offerWordToAnki = offerWordToAnki;
 
 // « Hypothèse, supposition. » -> « Hypothèse »
 function shortenFrTranslation(t) {
