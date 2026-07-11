@@ -371,7 +371,7 @@
   .ex-pill.active { background: var(--accent); color: #fff; box-shadow: none; }
   .ex-pill:disabled { opacity: .4; cursor: default; }
 
-  .ex-main-actions { display: flex; justify-content: center; margin-top: .5rem; }
+  .ex-main-actions { display: flex; justify-content: center; gap: 10px; margin-top: .5rem; }
 
   .ex-chips-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1rem; }
   .ex-chip { display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 12.5px; font-weight: 600; }
@@ -411,7 +411,42 @@
   .ex-error-wrong { color: var(--danger); text-decoration: line-through; }
   .ex-error-right { color: var(--success); font-weight: 600; }
 
-  .ex-next-actions { display: flex; justify-content: center; }
+  .ex-next-actions { display: flex; justify-content: center; gap: 10px; }
+
+  /* ---------- Mode « blocs » (reconstruction de phrase façon Duolingo) ---------- */
+  .ex-blocks-hint { text-align: center; font-size: 13px; color: var(--text2); margin-bottom: 1rem; }
+  .ex-answer-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; min-height: 58px; max-width: 760px; margin: 0 auto 1.2rem; padding: 10px 14px; border-radius: var(--radius-lg); background: var(--bg); box-shadow: inset 0 0 0 1px var(--border2); }
+  .ex-answer-line.ok { box-shadow: inset 0 0 0 2px var(--success); animation: blockOk .4s ease; }
+  .ex-answer-line.shake { box-shadow: inset 0 0 0 2px var(--danger); animation: blockShake .4s ease; }
+  .ex-answer-placeholder { font-size: 13px; color: var(--text3); font-style: italic; }
+  .ex-bank { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 760px; margin: 0 auto 1.4rem; }
+  .ex-block { font-family: var(--reading-font); font-size: 17px; font-weight: 500; color: var(--text); background: var(--bg2); border: none; border-radius: 10px; padding: 9px 14px; box-shadow: var(--shadow-sm), 0 2px 0 var(--border2); transition: transform .12s, box-shadow .12s, background .12s; animation: blockIn .28s ease backwards; }
+  .ex-block:hover { transform: translateY(-2px); background: var(--hover-strong); }
+  .ex-block:active { transform: translateY(0); }
+  .ex-block.in-answer { background: color-mix(in srgb, var(--accent) 13%, var(--bg2)); }
+  .ex-blocks-result { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14.5px; font-weight: 600; margin-bottom: 1rem; }
+  .ex-blocks-result.ok { color: var(--success); }
+  .ex-blocks-result.ko { color: var(--danger); font-weight: 500; }
+  .ex-blocks-result.ko strong { font-family: var(--reading-font); }
+  @keyframes blockIn { from { opacity: 0; transform: translateY(8px) scale(.85); } }
+  @keyframes blockShake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-7px); } 40%,80% { transform: translateX(7px); } }
+  @keyframes blockOk { 0% { transform: scale(1); } 40% { transform: scale(1.025); } 100% { transform: scale(1); } }
+
+  /* ---------- Animations globales ---------- */
+  main > .view { animation: viewIn .28s ease; }
+  @keyframes viewIn { from { opacity: 0; transform: translateY(10px); } }
+  .word-popup { animation: popIn .18s ease; }
+  .font-popover { animation: popIn .15s ease; }
+  @keyframes popIn { from { opacity: 0; transform: translateY(6px) scale(.97); } }
+  .transcript-check { animation: checkPop .35s cubic-bezier(.3,1.6,.5,1); }
+  @keyframes checkPop { from { transform: scale(0); } }
+  .phrase-card, .word-card { transition: transform .15s, box-shadow .15s; }
+  .phrase-card:hover, .word-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+  .sentence-current .w { animation: wordIn .3s ease backwards; }
+  @keyframes wordIn { from { opacity: 0; transform: translateY(5px); } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  }
 
   @media (max-width: 999px) {
     #view-player { flex-direction: column; }

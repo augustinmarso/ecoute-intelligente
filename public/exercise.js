@@ -50,6 +50,25 @@ let exGenError = '';
 let exGradeError = '';
 let exRecognition = null;
 let exRecognizing = false;
+let exBlocks = null;         // mode « blocs » : { fr, en, words, bank, answer, result }
+
+/* ---------------------------------------------------------------
+ * Phrases générées enregistrées (rejouables en mode blocs)
+ * ------------------------------------------------------------- */
+
+const EX_SAVED_KEY = 'ei-sentences-v1';
+
+function getSavedSentences() {
+  try { return JSON.parse(localStorage.getItem(EX_SAVED_KEY) || '[]'); }
+  catch (_) { return []; }
+}
+
+function saveGeneratedSentence(fr, en) {
+  if (!fr || !en) return;
+  const list = getSavedSentences().filter(s => s.en !== en);
+  list.unshift({ fr, en });
+  try { localStorage.setItem(EX_SAVED_KEY, JSON.stringify(list.slice(0, 100))); } catch (_) {}
+}
 
 function _hasSpeechRecognition() {
   return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -137,6 +156,7 @@ async function runGeneration(words, tense) {
     });
     exCurrent.fr = result.fr || '';
     exCurrent.en = result.en || '';
+    saveGeneratedSentence(exCurrent.fr, exCurrent.en); // rejouable en mode blocs
     exPhase = 'answering';
   } catch (e) {
     exGenError = e.message || 'Erreur inconnue';
@@ -261,7 +281,12 @@ function renderExercise() {
   let html = '';
   if (exPhase === 'idle') {
     html = renderSettingsRow(false) +
-      `<div class="ex-main-actions"><button class="btn-main" id="ex-new-sentence">${icon('auto_awesome', 16)} Nouvelle phrase</button></div>`;
+      `<div class="ex-main-actions">
+        <button class="btn-main" id="ex-new-sentence">${icon('auto_awesome', 16)} Nouvelle phrase</button>
+        ${getSavedSentences().length ? `<button class="btn-main" id="ex-replay-blocks">${icon('extension', 16)} Rejouer en blocs</button>` : ''}
+      </div>`;
+  } else if (exPhase === 'blocks') {
+    html = renderBlocks();
   } else if (exPhase === 'generating') {
     html = renderSettingsRow(true) + renderChips() +
       `<div class="ex-loading-block"><div class="spinner"></div><p>Génération de la phrase…</p></div>`;
@@ -348,9 +373,82 @@ function renderCorrected() {
       <div class="ex-correction-text">${wordsHtml}</div>
       <div class="ex-feedback">${escapeHtml(c.feedback)}</div>
       ${errorsHtml}
-      <div class="ex-next-actions"><button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button></div>
+      <div class="ex-next-actions">
+        <button class="btn-main" id="ex-to-blocks">${icon('extension', 16)} Reconstruire en blocs</button>
+        <button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button>
+      </div>
     </div>
   `;
+}
+
+/* ---------------------------------------------------------------
+ * Mode « blocs » — reconstruire la phrase anglaise façon Duolingo
+ * ------------------------------------------------------------- */
+
+function startBlocks(fr, en) {
+  const words = String(en || '').trim().split(/\s+/);
+  const bank = words.map((_, i) => i);
+  // Mélange (en évitant de retomber sur l'ordre d'origine quand c'est possible)
+  for (let tries = 0; tries < 5; tries++) {
+    for (let i = bank.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = bank[i]; bank[i] = bank[j]; bank[j] = t;
+    }
+    if (bank.some((v, i) => v !== i) || words.length < 2) break;
+  }
+  exBlocks = { fr, en, words, bank, answer: [], result: null };
+  exPhase = 'blocks';
+  renderExercise();
+}
+
+function renderBlocks() {
+  const b = exBlocks;
+  const answerHtml = b.answer.map((wi, pos) =>
+    `<button type="button" class="ex-block in-answer" data-pos="${pos}">${escapeHtml(b.words[wi])}</button>`).join('');
+  const bankHtml = b.bank.map((wi, pos) =>
+    `<button type="button" class="ex-block" data-bank="${pos}" style="animation-delay:${pos * 35}ms">${escapeHtml(b.words[wi])}</button>`).join('');
+
+  let footer;
+  if (b.result === 'ok') {
+    footer = `<div class="ex-blocks-result ok">${icon('check_circle', 18)} Parfait ! +8 XP</div>
+      <div class="ex-next-actions"><button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button></div>`;
+  } else if (b.result === 'ko') {
+    footer = `<div class="ex-blocks-result ko">${icon('cancel', 18)}&nbsp;Pas tout à fait — réponse : <strong>${escapeHtml(b.en)}</strong></div>
+      <div class="ex-next-actions">
+        <button class="btn-main" id="ex-blocks-retry">${icon('refresh', 16)} Réessayer</button>
+        <button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button>
+      </div>`;
+  } else {
+    footer = `<div class="ex-next-actions"><button class="btn-main" id="ex-blocks-check"${b.bank.length ? ' disabled' : ''}>${icon('check', 16)} Vérifier</button></div>`;
+  }
+
+  return `
+    <div class="ex-fr-sentence">${escapeHtml(b.fr)}</div>
+    <div class="ex-blocks-hint">Reconstruis la phrase anglaise en cliquant les blocs dans l'ordre :</div>
+    <div class="ex-answer-line${b.result === 'ko' ? ' shake' : ''}${b.result === 'ok' ? ' ok' : ''}">${answerHtml || '<span class="ex-answer-placeholder">Clique les blocs ci-dessous…</span>'}</div>
+    <div class="ex-bank">${bankHtml}</div>
+    ${footer}
+  `;
+}
+
+function checkBlocks() {
+  const b = exBlocks;
+  const guess = b.answer.map(i => b.words[i]).join(' ');
+  if (guess === b.words.join(' ')) {
+    b.result = 'ok';
+    exSessionPoints += 8;
+    addXp(8);
+  } else {
+    b.result = 'ko';
+  }
+  renderExercise();
+}
+
+function replaySavedBlocks() {
+  const list = getSavedSentences();
+  if (!list.length) { showToast("Aucune phrase enregistrée pour l'instant"); return; }
+  const s = list[Math.floor(Math.random() * list.length)];
+  startBlocks(s.fr, s.en);
 }
 
 function wireReadyState(body) {
@@ -363,6 +461,32 @@ function wireReadyState(body) {
 
   const newBtn = document.getElementById('ex-new-sentence'); if (newBtn) newBtn.onclick = generateSentence;
   const retryGen = document.getElementById('ex-retry-gen'); if (retryGen) retryGen.onclick = retryGeneration;
+
+  // Mode blocs
+  const toBlocks = document.getElementById('ex-to-blocks');
+  if (toBlocks) toBlocks.onclick = () => startBlocks(exCurrent.fr, exCurrent.en);
+  const replayBlocks = document.getElementById('ex-replay-blocks');
+  if (replayBlocks) replayBlocks.onclick = replaySavedBlocks;
+  const blocksCheck = document.getElementById('ex-blocks-check');
+  if (blocksCheck) blocksCheck.onclick = checkBlocks;
+  const blocksRetry = document.getElementById('ex-blocks-retry');
+  if (blocksRetry) blocksRetry.onclick = () => startBlocks(exBlocks.fr, exBlocks.en);
+  body.querySelectorAll('.ex-block[data-bank]').forEach(btn => {
+    btn.onclick = () => {
+      if (!exBlocks || exBlocks.result === 'ok') return;
+      exBlocks.result = null;
+      exBlocks.answer.push(exBlocks.bank.splice(+btn.dataset.bank, 1)[0]);
+      renderExercise();
+    };
+  });
+  body.querySelectorAll('.ex-block.in-answer').forEach(btn => {
+    btn.onclick = () => {
+      if (!exBlocks || exBlocks.result === 'ok') return;
+      exBlocks.result = null;
+      exBlocks.bank.push(exBlocks.answer.splice(+btn.dataset.pos, 1)[0]);
+      renderExercise();
+    };
+  });
   const submitBtn = document.getElementById('ex-submit'); if (submitBtn) submitBtn.onclick = validateAnswer;
   const retryGrade = document.getElementById('ex-retry-grade'); if (retryGrade) retryGrade.onclick = gradeAnswer;
   const micBtn = document.getElementById('ex-mic-btn'); if (micBtn) micBtn.onclick = toggleMic;
@@ -463,4 +587,9 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
   if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') return;
   if (exPhase === 'corrected') { e.preventDefault(); generateSentence(); }
+  else if (exPhase === 'blocks' && exBlocks) {
+    e.preventDefault();
+    if (exBlocks.result === 'ok') generateSentence();
+    else if (!exBlocks.bank.length && !exBlocks.result) checkBlocks();
+  }
 });

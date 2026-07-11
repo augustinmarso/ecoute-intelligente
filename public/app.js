@@ -869,51 +869,14 @@ async function doCapture() {
       addXp(10);
       showToast('Carte créée +10 XP');
       if (res.image) flyThumbnail(res.image, btnRect);
-      exportComplexWords(sentence); // tâche de fond, ne bloque pas l'UI
+      // (plus d'ajout automatique des mots difficiles : les mots ne partent
+      // dans Anki que via le bouton du popup de traduction)
     }
   } catch (err) {
     showToast('Erreur de capture : ' + (err.message || 'inconnue'));
   } finally {
     capturing = false;
     setCaptureState('idle');
-  }
-}
-
-// Repère les mots difficiles de la phrase capturée et les ajoute à Anki en
-// tâche de fond (séquentiellement), sans bloquer le bouton de capture.
-async function exportComplexWords(sentence) {
-  const words = window.findComplexWords ? window.findComplexWords(sentence.text, 3) : [];
-  if (!words.length) return;
-
-  let added = 0;
-  for (const word of words) {
-    let data;
-    try { data = await lookupWord(word); }
-    catch (_) { continue; }
-    if (!data.translation) continue; // pas de traduction au dictionnaire -> pas de carte vide
-
-    try {
-      const res = await fetch('/api/word', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          word: data.word, phonetic: data.phonetic,
-          translation: data.translation, example: sentence.text, videoTitle: currentVideoMeta?.title
-        })
-      }).then(r => r.json());
-      if (res.error) continue;
-      if (!res.duplicate) {
-        stats.totalWords += 1;
-        saveStats();
-        addXp(5);
-        added += 1;
-      }
-    } catch (_) { /* échec réseau : on continue avec le mot suivant */ }
-  }
-
-  if (added >= 1) {
-    const s = added > 1 ? 's' : '';
-    showToast(`${added} mot${s} difficile${s} ajouté${s} +${added * 5} XP`);
   }
 }
 
@@ -957,64 +920,47 @@ function isWordSeen(videoId, word) {
   return !!set && set.has(word);
 }
 
-// Traduction FR raccourcie pour affichage en place : premier segment avant
-// virgule/point-virgule, sans point final. Ex. « Hypothèse. » -> « Hypothèse ».
-function shortenFrTranslation(t) {
-  if (!t) return '';
-  return String(t).split(/[,;]/)[0].trim().replace(/\.$/, '').trim();
-}
-
-// Affiche la traduction FR en place sur le span cliqué (orange), le temps de
-// la réponse de lookupWord, puis pendant 8s, avant de revenir au mot anglais
-// (qui reste marqué orange = "déjà consulté"). Partage la promesse de lookup
-// passée par onWordClick (ne relance pas de requête réseau en plus de
-// addWordDirect).
-async function showFrenchInPlace(span, word, lookupPromise) {
-  span.classList.add('w-fr');
-  let data = null;
-  try { data = await lookupPromise; } catch (_) { /* échec réseau : rien à afficher */ }
-
-  // La phrase affichée a pu changer entre-temps (span retiré du DOM).
-  if (!span.isConnected) return;
-
-  if (!data || !data.translation) {
-    // Pas de traduction : on ne touche pas au texte, le toast d'échec
-    // existant (déclenché par addWordDirect) suffit. On retire juste
-    // l'indicateur "en cours" sans casser un éventuel .w-seen précédent.
-    span.classList.remove('w-fr');
-    return;
-  }
-
-  span.classList.remove('w-seen');
-  const original = span.textContent;
-  span.textContent = shortenFrTranslation(data.translation);
-  markWordSeen(currentVideoId, word);
-
-  setTimeout(() => {
-    if (!span.isConnected) return; // phrase changée entre-temps : rien à faire
-    span.textContent = original;
-    span.classList.remove('w-fr');
-    span.classList.add('w-seen');
-  }, 8000);
-}
-
+// Clic sur un mot anglais : pause vidéo, traduction française affichée EN
+// PLACE dans la phrase (orange), retour au mot anglais après 8 s (le mot
+// reste orange), et ajout direct de la carte Anki. Pas de popup.
 function onWordClick(e, span) {
   e.stopPropagation();
   const raw = span.textContent;
   const clean = window.cleanWord ? window.cleanWord(raw) : raw.toLowerCase();
   if (!clean) return;
-  // Mot déjà en cours de traduction/affichage FR (fenêtre de 8s) : on ignore
-  // le clic pour ne pas relancer un lookup ni doubler le timer de retour.
-  if (span.classList.contains('w-fr')) return;
+  if (span.classList.contains('w-fr')) return; // déjà en train d'afficher le FR
 
-  // Pas de popup : on met la vidéo en pause et on ajoute directement le mot.
   if (ytPlayer && ytPlayer.pauseVideo) { try { ytPlayer.pauseVideo(); } catch (_) {} }
 
-  // Une seule requête lookupWord pour les deux effets (ajout Anki + affichage
-  // FR en place), sa promesse est partagée entre addWordDirect et l'affichage.
+  // Une seule requête dictionnaire, partagée entre l'affichage et l'ajout Anki.
   const lookupPromise = lookupWord(clean);
+  showFrenchInPlace(span, raw, lookupPromise);
+  markWordSeen(currentVideoId, clean);
   addWordDirect(clean, currentSentence?.text || '', currentVideoMeta?.title || '', lookupPromise);
-  showFrenchInPlace(span, clean, lookupPromise);
+}
+
+// « Hypothèse, supposition. » -> « Hypothèse »
+function shortenFrTranslation(t) {
+  return String(t || '').split(/[;,]/)[0].replace(/\.\s*$/, '').trim();
+}
+
+async function showFrenchInPlace(span, originalText, lookupPromise) {
+  span.classList.add('w-fr');
+  let data = null;
+  try { data = await lookupPromise; } catch (_) {}
+  const fr = data && shortenFrTranslation(data.translation);
+  if (!fr || !span.isConnected) {
+    span.classList.remove('w-fr');
+    span.classList.add('w-seen');
+    return;
+  }
+  span.textContent = fr;
+  setTimeout(() => {
+    if (!span.isConnected) return; // la phrase affichée a changé entre-temps
+    span.textContent = originalText;
+    span.classList.remove('w-fr');
+    span.classList.add('w-seen');
+  }, 8000);
 }
 
 // Ajout direct d'un mot à Anki (traduction dictionnaire), sans popup.
@@ -1056,6 +1002,7 @@ window.addWordDirect = addWordDirect;
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   hideFontPopover();
+  hideWordPopup();
   if (!document.getElementById('view-cards').hidden) hideCards();
   if (!document.getElementById('view-exercise').hidden) hideExercise();
 });
