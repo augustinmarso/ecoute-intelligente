@@ -387,39 +387,45 @@ function renderCorrected() {
 
 function startBlocks(fr, en) {
   const words = String(en || '').trim().split(/\s+/);
-  const bank = words.map((_, i) => i);
+  const order = words.map((_, i) => i);
   // Mélange (en évitant de retomber sur l'ordre d'origine quand c'est possible)
   for (let tries = 0; tries < 5; tries++) {
-    for (let i = bank.length - 1; i > 0; i--) {
+    for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      const t = bank[i]; bank[i] = bank[j]; bank[j] = t;
+      const t = order[i]; order[i] = order[j]; order[j] = t;
     }
-    if (bank.some((v, i) => v !== i) || words.length < 2) break;
+    if (order.some((v, i) => v !== i) || words.length < 2) break;
   }
-  exBlocks = { fr, en, words, bank, answer: [], result: null };
+  // order = disposition FIXE de la banque (les blocs pris laissent une case
+  // fantôme, comme sur Duolingo) ; answer = indices choisis, dans l'ordre.
+  exBlocks = { fr, en, words, order, answer: [], result: null };
   exPhase = 'blocks';
   renderExercise();
 }
 
 function renderBlocks() {
   const b = exBlocks;
+  const inAnswer = new Set(b.answer);
   const answerHtml = b.answer.map((wi, pos) =>
-    `<button type="button" class="ex-block in-answer" data-pos="${pos}">${escapeHtml(b.words[wi])}</button>`).join('');
-  const bankHtml = b.bank.map((wi, pos) =>
-    `<button type="button" class="ex-block" data-bank="${pos}" style="animation-delay:${pos * 35}ms">${escapeHtml(b.words[wi])}</button>`).join('');
+    `<button type="button" class="ex-block in-answer" data-pos="${pos}" data-word="${escapeHtml(b.words[wi])}">${escapeHtml(b.words[wi])}</button>`).join('');
+  const bankHtml = b.order.map((wi, pos) =>
+    `<button type="button" class="ex-block${inAnswer.has(wi) ? ' ghost' : ''}" data-wi="${wi}" data-word="${escapeHtml(b.words[wi])}" style="animation-delay:${pos * 35}ms"${inAnswer.has(wi) && !b.result ? ' disabled' : ''}>${escapeHtml(b.words[wi])}</button>`).join('');
 
   let footer;
+  const ankiHint = `<div class="ex-blocks-hint">${icon('style', 14)} Clique un mot pour l'ajouter à Anki</div>`;
   if (b.result === 'ok') {
     footer = `<div class="ex-blocks-result ok">${icon('check_circle', 18)} Parfait ! +8 XP</div>
+      ${ankiHint}
       <div class="ex-next-actions"><button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button></div>`;
   } else if (b.result === 'ko') {
     footer = `<div class="ex-blocks-result ko">${icon('cancel', 18)}&nbsp;Pas tout à fait — réponse : <strong>${escapeHtml(b.en)}</strong></div>
+      ${ankiHint}
       <div class="ex-next-actions">
         <button class="btn-main" id="ex-blocks-retry">${icon('refresh', 16)} Réessayer</button>
         <button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button>
       </div>`;
   } else {
-    footer = `<div class="ex-next-actions"><button class="btn-main" id="ex-blocks-check"${b.bank.length ? ' disabled' : ''}>${icon('check', 16)} Vérifier</button></div>`;
+    footer = `<div class="ex-next-actions"><button class="btn-main" id="ex-blocks-check"${b.answer.length === b.words.length ? '' : ' disabled'}>${icon('check', 16)} Vérifier</button></div>`;
   }
 
   return `
@@ -442,6 +448,13 @@ function checkBlocks() {
     b.result = 'ko';
   }
   renderExercise();
+}
+
+// Après vérification, cliquer un mot (banque ou réponse) l'ajoute à Anki.
+function blockWordToAnki(raw) {
+  const clean = window.cleanWord ? window.cleanWord(raw) : String(raw || '').toLowerCase();
+  if (!clean) return;
+  window.addWordDirect(clean, exBlocks ? exBlocks.en : '', 'Exercice blocs');
 }
 
 function replaySavedBlocks() {
@@ -471,19 +484,22 @@ function wireReadyState(body) {
   if (blocksCheck) blocksCheck.onclick = checkBlocks;
   const blocksRetry = document.getElementById('ex-blocks-retry');
   if (blocksRetry) blocksRetry.onclick = () => startBlocks(exBlocks.fr, exBlocks.en);
-  body.querySelectorAll('.ex-block[data-bank]').forEach(btn => {
+  body.querySelectorAll('.ex-block[data-wi]').forEach(btn => {
     btn.onclick = () => {
-      if (!exBlocks || exBlocks.result === 'ok') return;
-      exBlocks.result = null;
-      exBlocks.answer.push(exBlocks.bank.splice(+btn.dataset.bank, 1)[0]);
+      if (!exBlocks) return;
+      // Après vérification : un clic sur un mot l'ajoute à Anki.
+      if (exBlocks.result) { blockWordToAnki(btn.dataset.word); return; }
+      const wi = +btn.dataset.wi;
+      if (exBlocks.answer.includes(wi)) return; // case fantôme
+      exBlocks.answer.push(wi);
       renderExercise();
     };
   });
   body.querySelectorAll('.ex-block.in-answer').forEach(btn => {
     btn.onclick = () => {
-      if (!exBlocks || exBlocks.result === 'ok') return;
-      exBlocks.result = null;
-      exBlocks.bank.push(exBlocks.answer.splice(+btn.dataset.pos, 1)[0]);
+      if (!exBlocks) return;
+      if (exBlocks.result) { blockWordToAnki(btn.dataset.word); return; }
+      exBlocks.answer.splice(+btn.dataset.pos, 1);
       renderExercise();
     };
   });

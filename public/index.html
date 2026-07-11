@@ -430,6 +430,10 @@
   .ex-block:hover { transform: translateY(-2px); background: var(--hover-strong); }
   .ex-block:active { transform: translateY(0); }
   .ex-block.in-answer { background: color-mix(in srgb, var(--accent) 13%, var(--bg2)); }
+  /* Case fantôme façon Duolingo : le bloc pris laisse son emplacement visible
+     dans la banque (pas de saut de mise en page). */
+  .ex-block.ghost { color: transparent; background: var(--bg3); box-shadow: inset 0 0 0 1px var(--border); cursor: default; }
+  .ex-block.ghost:hover { transform: none; }
   .ex-blocks-result { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 14.5px; font-weight: 600; margin-bottom: 1rem; }
   .ex-blocks-result.ok { color: var(--success); }
   .ex-blocks-result.ko { color: var(--danger); font-weight: 500; }
