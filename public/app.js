@@ -1010,24 +1010,21 @@ function isWordSeen(videoId, word) {
   return !!set && set.has(word);
 }
 
-// Clic sur un mot anglais : pause vidéo, traduction française affichée EN
-// PLACE dans la phrase (orange), retour au mot anglais après 8 s (le mot
-// reste orange). AUCUN ajout automatique à Anki : une barre de confirmation
-// propose l'ajout, qui ne part qu'au clic sur « Ajouter ».
+// Clic sur un mot anglais : pause vidéo, le mot passe en orange (consulté) et
+// la traduction s'affiche UNE SEULE FOIS, dans la barre du bas (« mot →
+// traduction »). Le mot dans la phrase n'est PAS remplacé (sinon la traduction
+// apparaîtrait à deux endroits). AUCUN ajout auto à Anki : bouton dans la barre.
 function onWordClick(e, span) {
   e.stopPropagation();
   const raw = span.textContent;
   const clean = window.cleanWord ? window.cleanWord(raw) : raw.toLowerCase();
   if (!clean) return;
-  if (span.classList.contains('w-fr')) return; // déjà en train d'afficher le FR
 
   if (ytPlayer && ytPlayer.pauseVideo) { try { ytPlayer.pauseVideo(); } catch (_) {} }
 
-  // Une seule requête dictionnaire, partagée entre l'affichage et la proposition Anki.
-  const lookupPromise = lookupWord(clean);
-  showFrenchInPlace(span, raw, lookupPromise);
+  span.classList.add('w-seen'); // marque le mot consulté, sans le remplacer
   markWordSeen(currentVideoId, clean);
-  offerWordToAnki(clean, currentSentence?.text || '', currentVideoMeta?.title || '', lookupPromise);
+  offerWordToAnki(clean, currentSentence?.text || '', currentVideoMeta?.title || '', lookupWord(clean));
 }
 
 // Barre de confirmation en bas de l'écran : « mot → traduction [Ajouter à Anki] ».
@@ -1061,29 +1058,10 @@ function shortenFrTranslation(t) {
   return String(t || '').split(/[;,]/)[0].replace(/\.\s*$/, '').trim();
 }
 
-async function showFrenchInPlace(span, originalText, lookupPromise) {
-  span.classList.add('w-fr');
-  let data = null;
-  try { data = await lookupPromise; } catch (_) {}
-  const fr = data && shortenFrTranslation(data.translation);
-  if (!fr || !span.isConnected) {
-    span.classList.remove('w-fr');
-    span.classList.add('w-seen');
-    return;
-  }
-  span.textContent = fr;
-  setTimeout(() => {
-    if (!span.isConnected) return; // la phrase affichée a changé entre-temps
-    span.textContent = originalText;
-    span.classList.remove('w-fr');
-    span.classList.add('w-seen');
-  }, 8000);
-}
-
 // Ajout direct d'un mot à Anki (traduction dictionnaire), sans popup.
 // Utilisé au clic sur un mot du sous-titre et dans la page d'exercices.
 // `lookupPromise` est optionnel : si fourni (clic sur un mot du sous-titre),
-// on le réutilise au lieu de relancer lookupWord (cf. showFrenchInPlace).
+// on le réutilise au lieu de relancer un second lookupWord.
 const _addingWords = new Set();
 async function addWordDirect(word, example, sourceTitle, lookupPromise) {
   if (_addingWords.has(word)) return; // anti double-clic
