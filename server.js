@@ -242,10 +242,12 @@ async function ensureAnki() {
   await anki('createDeck', { deck: DECK_THEME });
   const models = await anki('modelNames');
   // Carte phrase (thème inversé, demande utilisateur) : recto = traduction
-  // française + screenshot ; verso = audio (joué automatiquement) + phrase
-  // anglaise. updateModelTemplates aligne aussi les cartes déjà créées.
+  // française + screenshot ; verso = image + audio (joué automatiquement) +
+  // phrase anglaise. La traduction FR n'apparaît qu'au recto (PAS de
+  // {{FrontSide}} au verso, sinon elle serait affichée deux fois).
+  // updateModelTemplates aligne aussi les cartes déjà créées.
   const PHRASE_FRONT = `<div class="ei-text">{{Translation}}</div>{{Image}}`;
-  const PHRASE_BACK = `{{FrontSide}}<hr id="answer">{{Audio}}<div class="ei-text">{{Text}}</div><div class="ei-src">{{Source}}</div>`;
+  const PHRASE_BACK = `{{Image}}<hr id="answer">{{Audio}}<div class="ei-text">{{Text}}</div><div class="ei-src">{{Source}}</div>`;
   if (!models.includes(MODEL_PHRASE)) {
     await anki('createModel', {
       modelName: MODEL_PHRASE,
