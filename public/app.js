@@ -201,6 +201,7 @@ function defaultStats() {
     totalWords: 0,
     totalMinutes: 0,
     dailyCaptures: {},          // { 'YYYY-MM-DD': count }
+    dailyWords: {},             // { 'YYYY-MM-DD': count } — quota quotidien de mots
     captures: {},               // { videoId: [start, ...] } — phrases déjà capturées
     completedVideos: [],        // ids de vidéos vues à >90%
     badges: []                  // ids de badges débloqués
@@ -274,6 +275,27 @@ function incrementDailyCapture() {
 }
 
 function todayCaptureCount() { return stats.dailyCaptures[todayStr()] || 0; }
+
+/* ---------- Quota quotidien de mots ---------- */
+
+const WORD_GOAL = 10;
+
+function todayWordCount() { return (stats.dailyWords || {})[todayStr()] || 0; }
+
+// Appelé à chaque mot réellement ajouté à Anki (non-doublon).
+function incrementDailyWord() {
+  if (!stats.dailyWords) stats.dailyWords = {};
+  const today = todayStr();
+  stats.dailyWords[today] = (stats.dailyWords[today] || 0) + 1;
+  saveStats();
+  if (stats.dailyWords[today] === WORD_GOAL) {
+    addXp(20);
+    showToast(`Objectif du jour atteint : ${WORD_GOAL} mots ! +20 XP`);
+    pulseHeader();
+  }
+  renderSessionProgress();
+  renderTodayCard();
+}
 
 function isSentenceCaptured(videoId, start) {
   const list = stats.captures[videoId];
@@ -427,6 +449,7 @@ function showHome() {
   document.getElementById('view-player').hidden = true;
   document.getElementById('view-home').hidden = false;
   renderRecent();
+  renderTodayCard();
 }
 
 function showPlayerView() {
@@ -462,6 +485,70 @@ function renderRecent() {
       openVideo(v.id, v.position || 0);
     };
   });
+}
+
+/* ---------- Carte « Aujourd'hui » (accueil) : quota mots + révisions ---------- */
+
+function renderTodayCard() {
+  const el = document.getElementById('today-card');
+  if (!el) return;
+  const count = todayWordCount();
+  const done = count >= WORD_GOAL;
+  const pct = Math.min(100, Math.round((count / WORD_GOAL) * 100));
+
+  el.innerHTML = `
+    <div class="today-row">
+      <span class="ms today-icon${done ? ' ok' : ''}">${done ? 'task_alt' : 'flag'}</span>
+      <div class="today-text">
+        <strong>${done ? 'Objectif du jour atteint !' : 'Objectif du jour'} — ${count}/${WORD_GOAL} mots</strong>
+        <div class="today-track"><div class="today-fill${done ? ' ok' : ''}" style="width:${pct}%"></div></div>
+      </div>
+    </div>
+    <div class="today-row" id="today-review">
+      <span class="ms today-icon">hourglass_top</span>
+      <div class="today-text">Révisions : vérification…</div>
+    </div>
+  `;
+  updateReviewStatus();
+}
+
+// « Dois-je réviser ? » : fiches dues dans Anki (tout le deck Écoute
+// Intelligente) + phrases générées dues côté Exercices (même règle des ~20 h).
+async function updateReviewStatus() {
+  let duePhrases = 0;
+  try {
+    const now = Date.now();
+    duePhrases = (JSON.parse(localStorage.getItem('ei-sentences-v1') || '[]'))
+      .filter(s => now - (s.lastReview || s.ts || 0) > 20 * 3600 * 1000).length;
+  } catch (_) {}
+
+  let ankiDue = null;
+  try {
+    const r = await fetch('/api/anki', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'findCards', params: { query: '"deck:Écoute Intelligente" is:due' } })
+    }).then(x => x.json());
+    if (!r.error) ankiDue = (r.result || []).length;
+  } catch (_) {}
+
+  const el = document.getElementById('today-review');
+  if (!el) return;
+
+  const parts = [];
+  if (ankiDue > 0) parts.push(`<strong>${ankiDue} fiche${ankiDue > 1 ? 's' : ''} Anki</strong> à réviser`);
+  if (duePhrases > 0) parts.push(`<strong>${duePhrases} phrase${duePhrases > 1 ? 's' : ''}</strong> à revoir dans Exercices`);
+
+  if (parts.length) {
+    el.innerHTML = `<span class="ms today-icon due">notifications_active</span>
+      <div class="today-text">Oui, à réviser : ${parts.join(' · ')}</div>`;
+  } else if (ankiDue === 0) {
+    el.innerHTML = `<span class="ms today-icon ok">check_circle</span>
+      <div class="today-text">Rien à réviser — tes fiches sont à jour</div>`;
+  } else {
+    // Anki fermé : impossible de savoir pour les fiches
+    el.innerHTML = `<span class="ms today-icon">help</span>
+      <div class="today-text">Ouvre Anki pour vérifier tes fiches à réviser</div>`;
+  }
 }
 
 async function checkAnkiHealth() {
@@ -526,6 +613,7 @@ document.addEventListener('DOMContentLoaded', () => {
   tickDailyStreak();
   renderHeader();
   renderRecent();
+  renderTodayCard();
   checkAnkiHealth();
 });
 
@@ -797,6 +885,8 @@ function renderTranscriptHighlight() {
 function renderSessionProgress() {
   const goal = 10;
   const count = todayCaptureCount();
+  const wordsEl = document.getElementById('session-words');
+  if (wordsEl) wordsEl.textContent = todayWordCount();
   document.getElementById('session-count').textContent = count;
   document.getElementById('session-ring-count').textContent = count;
   const circumference = 113; // 2*pi*18 environ
@@ -1014,7 +1104,7 @@ async function addWordDirect(word, example, sourceTitle, lookupPromise) {
       showToast(`« ${word} » est déjà dans Anki`);
     } else {
       stats.totalWords += 1;
-      saveStats();
+      incrementDailyWord(); // sauvegarde + quota du jour
       addXp(5);
       showToast(`${word} → ${data.translation.replace(/\.$/, '')} · ajouté +5 XP`);
     }
@@ -1029,7 +1119,7 @@ window.addWordDirect = addWordDirect;
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   hideFontPopover();
-  hideWordPopup();
+  document.getElementById('word-offer').hidden = true; // barre « Ajouter à Anki »
   if (!document.getElementById('view-cards').hidden) hideCards();
   if (!document.getElementById('view-exercise').hidden) hideExercise();
 });

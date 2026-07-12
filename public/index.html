@@ -130,6 +130,19 @@
   .url-form .btn-main { height: 44px; padding: 0 22px; flex-shrink: 0; }
   .url-error { color: var(--danger); font-size: 13px; margin: -1.7rem 0 1.7rem; }
 
+  /* Carte « Aujourd'hui » : quota de mots + statut révision */
+  .today-card { display: flex; flex-direction: column; gap: 12px; background: var(--bg2); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 14px 18px; margin-bottom: 2rem; }
+  .today-card:empty { display: none; }
+  .today-row { display: flex; align-items: center; gap: 12px; }
+  .today-icon { font-size: 20px; color: var(--text3); flex-shrink: 0; }
+  .today-icon.ok { color: var(--success); }
+  .today-icon.due { color: var(--warning); }
+  .today-text { flex: 1; font-size: 13.5px; color: var(--text2); line-height: 1.45; }
+  .today-text strong { color: var(--text); }
+  .today-track { height: 7px; border-radius: 4px; background: var(--bg3); overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); margin-top: 6px; }
+  .today-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s ease; }
+  .today-fill.ok { background: var(--success); }
+
   .section-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .9rem; }
   .recent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
   .recent-card { text-align: left; background: var(--bg2); border-radius: var(--radius-lg); overflow: hidden; border: none; transition: transform .15s, box-shadow .15s; box-shadow: var(--shadow-sm); }
@@ -524,6 +537,9 @@
         </form>
         <div class="url-error" id="url-error" hidden></div>
 
+        <!-- Quota quotidien de mots + « dois-je réviser ? » -->
+        <div class="today-card" id="today-card"></div>
+
         <div id="recent-section">
           <div class="section-title"><span class="ms" style="font-size:16px">history</span> Reprendre</div>
           <div class="recent-grid" id="recent-grid"></div>
@@ -584,7 +600,7 @@
               </svg>
               <span class="session-ring-count" id="session-ring-count">0</span>
             </div>
-            <div class="session-label"><strong id="session-count">0</strong> cartes aujourd'hui<br>objectif : 10</div>
+            <div class="session-label"><strong id="session-count">0</strong> cartes aujourd'hui<br><strong id="session-words">0</strong>/10 mots — objectif du jour</div>
           </div>
         </div>
         <div class="panel-title">Transcript</div>

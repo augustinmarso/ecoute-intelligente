@@ -241,17 +241,21 @@ async function ensureAnki() {
   await anki('createDeck', { deck: DECK_MOTS });
   await anki('createDeck', { deck: DECK_THEME });
   const models = await anki('modelNames');
+  // Carte phrase (thème inversé, demande utilisateur) : recto = traduction
+  // française + screenshot ; verso = audio (joué automatiquement) + phrase
+  // anglaise. updateModelTemplates aligne aussi les cartes déjà créées.
+  const PHRASE_FRONT = `<div class="ei-text">{{Translation}}</div>{{Image}}`;
+  const PHRASE_BACK = `{{FrontSide}}<hr id="answer">{{Audio}}<div class="ei-text">{{Text}}</div><div class="ei-src">{{Source}}</div>`;
   if (!models.includes(MODEL_PHRASE)) {
     await anki('createModel', {
       modelName: MODEL_PHRASE,
       inOrderFields: ['Image', 'Audio', 'Text', 'Translation', 'Source', 'Url'],
       css: CARD_CSS,
-      cardTemplates: [{
-        Name: 'Écoute',
-        Front: '{{Image}}<br>{{Audio}}',
-        Back: `{{FrontSide}}<hr id="answer"><div class="ei-text">{{Text}}</div>
-<div class="ei-trad">{{Translation}}</div><div class="ei-src">{{Source}}</div>`
-      }]
+      cardTemplates: [{ Name: 'Écoute', Front: PHRASE_FRONT, Back: PHRASE_BACK }]
+    });
+  } else {
+    await anki('updateModelTemplates', {
+      model: { name: MODEL_PHRASE, templates: { 'Écoute': { Front: PHRASE_FRONT, Back: PHRASE_BACK } } }
     });
   }
   // Verso volontairement minimal : uniquement la traduction française (pas de
