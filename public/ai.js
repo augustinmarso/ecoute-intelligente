@@ -6,7 +6,11 @@
 // =============================================================
 
 const AI_STORE_KEY = 'ei-ai';
-const AI_DEFAULTS = { keys: { anthropic: '', openai: '' }, model: 'claude-haiku-4-5' };
+const AI_DEFAULTS = {
+  keys: { anthropic: '', openai: '' },
+  model: 'claude-haiku-4-5',
+  lm: { url: 'http://localhost:1234/v1', model: '' } // LM Studio (local)
+};
 
 // Catalogue des modèles proposés (le fournisseur est déduit du modèle choisi)
 const AI_MODELS = {
@@ -18,9 +22,12 @@ const AI_MODELS = {
   'gpt-5.4-nano':      { provider: 'openai',    label: 'GPT-5.4 nano (raisonne, éco)' },
   'gpt-5.4-mini':      { provider: 'openai',    label: 'GPT-5.4 mini (raisonne)' },
   'gpt-5.4':           { provider: 'openai',    label: 'GPT-5.4 (raisonne, qualité)' },
-  'gpt-5.5':           { provider: 'openai',    label: 'GPT-5.5 (max)' }
+  'gpt-5.5':           { provider: 'openai',    label: 'GPT-5.5 (max)' },
+  // Modèle local via LM Studio (API compatible OpenAI, aucune clé, tout reste
+  // sur la machine). Le modèle réel (Qwen 2.5, etc.) est celui chargé dans LM Studio.
+  'lmstudio':          { provider: 'lmstudio',  label: 'LM Studio — local (Qwen…)' }
 };
-const AI_PROVIDER_LABELS = { anthropic: 'Claude', openai: 'OpenAI' };
+const AI_PROVIDER_LABELS = { anthropic: 'Claude', openai: 'OpenAI', lmstudio: 'LM Studio' };
 
 function _aiSettings() {
   let s;
@@ -28,19 +35,34 @@ function _aiSettings() {
   // Migration de l'ancien format { key, model } (clé unique Claude)
   if (s.key && !s.keys) s.keys = { anthropic: s.key, openai: '' };
   s.keys = Object.assign({}, AI_DEFAULTS.keys, s.keys || {});
+  s.lm = Object.assign({}, AI_DEFAULTS.lm, s.lm || {});
   if (!s.model || !AI_MODELS[s.model]) s.model = AI_DEFAULTS.model;
   return s;
 }
 function _aiSave(patch) {
   const s = _aiSettings();
   if (patch.keys) patch.keys = Object.assign({}, s.keys, patch.keys);
+  if (patch.lm) patch.lm = Object.assign({}, s.lm, patch.lm);
   localStorage.setItem(AI_STORE_KEY, JSON.stringify(Object.assign(s, patch)));
 }
 function _aiProvider(model) { return (AI_MODELS[model] || {}).provider || (String(model).startsWith('gpt') ? 'openai' : 'anthropic'); }
 function aiIsConfigured() {
   const s = _aiSettings();
-  return !!s.keys[_aiProvider(s.model)];
+  const p = _aiProvider(s.model);
+  if (p === 'lmstudio') return true; // pas de clé : il suffit que LM Studio tourne
+  return !!s.keys[p];
 }
+
+// Liste les modèles chargés dans LM Studio (GET /v1/models). Sert au bouton
+// « détecter » de la config.
+async function aiListLocalModels(url) {
+  const base = (url || _aiSettings().lm.url || 'http://localhost:1234/v1').replace(/\/+$/, '');
+  const r = await fetch(base + '/models');
+  if (!r.ok) throw new Error('LM Studio injoignable');
+  const j = await r.json();
+  return (j.data || []).map(m => m.id);
+}
+window.aiListLocalModels = aiListLocalModels;
 
 // --- Appel API (fetch direct navigateur : app statique sans build,
 // pas de SDK npm). Route vers Claude ou OpenAI selon le modèle choisi. ---
@@ -75,6 +97,37 @@ async function aiCall({ system, user, schema, maxTokens, model: modelOverride })
   let model = s.model;
   if (modelOverride && AI_MODELS[modelOverride] && s.keys[_aiProvider(modelOverride)]) model = modelOverride;
   const provider = _aiProvider(model);
+
+  // LM Studio (local, compatible OpenAI) : pas de clé, URL locale, le modèle
+  // réel est celui chargé dans LM Studio (Qwen 2.5, etc.).
+  if (provider === 'lmstudio') {
+    const base = (s.lm.url || 'http://localhost:1234/v1').replace(/\/+$/, '');
+    let lmModel = s.lm.model;
+    if (!lmModel) { // aucun modèle précisé -> on prend celui qui est chargé
+      try { lmModel = (await aiListLocalModels(base))[0]; } catch (_) {}
+    }
+    const body = {
+      model: lmModel || 'local-model',
+      max_tokens: maxTokens || 2000,
+      messages: [
+        { role: 'system', content: system || AI_DEFAULT_SYSTEM },
+        { role: 'user', content: user }
+      ]
+    };
+    if (schema) body.response_format = { type: 'json_schema', json_schema: { name: 'reponse', strict: true, schema } };
+    let data;
+    try {
+      data = await _aiHttp(base + '/chat/completions', {}, body);
+    } catch (e) {
+      throw new Error(/failed to fetch|networkerror|load failed|econnrefused/i.test(e.message)
+        ? `LM Studio injoignable — lance-le et active « Local Server » (${base})`
+        : e.message);
+    }
+    const msg = data.choices && data.choices[0] && data.choices[0].message;
+    if (!msg) throw new Error('Réponse LM Studio vide — un modèle est-il chargé ?');
+    return _aiParse(msg.content || '', schema);
+  }
+
   const key = s.keys[provider];
   if (!key) throw new Error(`Clé API ${AI_PROVIDER_LABELS[provider]} manquante — configure-la dans les réglages IA`);
 

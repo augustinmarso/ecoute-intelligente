@@ -626,12 +626,13 @@ function wireReadyState(body) {
 
 function renderConfigState() {
   const models = window.AI_MODELS || {};
-  const groups = { anthropic: [], openai: [] };
+  const groups = { anthropic: [], openai: [], lmstudio: [] };
   Object.entries(models).forEach(([id, m]) => {
     if (!groups[m.provider]) groups[m.provider] = [];
     groups[m.provider].push([id, m.label]);
   });
-  const s = window.aiSettings ? window.aiSettings() : { model: '' };
+  const s = window.aiSettings ? window.aiSettings() : { model: '', lm: {} };
+  const lm = s.lm || { url: 'http://localhost:1234/v1', model: '' };
   const optHtml = (arr) => arr.map(([id, label]) => `<option value="${id}" ${s.model === id ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
   return `
     <div class="ex-config-wrap">
@@ -642,14 +643,21 @@ function renderConfigState() {
           <select id="ex-ai-model">
             <optgroup label="Claude">${optHtml(groups.anthropic || [])}</optgroup>
             <optgroup label="OpenAI">${optHtml(groups.openai || [])}</optgroup>
+            <optgroup label="Local (gratuit)">${optHtml(groups.lmstudio || [])}</optgroup>
           </select>
         </div>
-        <div class="ex-field">
+        <div class="ex-field" id="ex-ai-key-field">
           <label>Clé API</label>
           <input type="password" id="ex-ai-key" placeholder="Clé API" autocomplete="off"/>
         </div>
+        <div class="ex-field" id="ex-lm-fields" hidden>
+          <label>Serveur LM Studio</label>
+          <input type="text" id="ex-lm-url" value="${escapeHtml(lm.url || 'http://localhost:1234/v1')}" autocomplete="off"/>
+          <label style="margin-top:10px">Modèle chargé <button type="button" class="ex-lm-detect" id="ex-lm-detect">détecter</button></label>
+          <input type="text" id="ex-lm-model" value="${escapeHtml(lm.model || '')}" placeholder="laisser vide = modèle chargé (ex : qwen2.5-7b-instruct)" autocomplete="off"/>
+        </div>
         <button class="btn-main" id="ex-ai-test">${icon('check', 16)} Tester et enregistrer</button>
-        <p class="ex-config-hint">La clé reste sur ton ordinateur (localStorage).</p>
+        <p class="ex-config-hint" id="ex-config-hint">La clé reste sur ton ordinateur (localStorage).</p>
       </div>
     </div>
   `;
@@ -658,29 +666,58 @@ function renderConfigState() {
 function wireConfigState() {
   const modelSel = document.getElementById('ex-ai-model');
   const keyInput = document.getElementById('ex-ai-key');
-  if (!modelSel || !keyInput) return;
+  if (!modelSel) return;
   const models = window.AI_MODELS || {};
   const providerOf = (m) => (models[m] || {}).provider || 'anthropic';
+  const keyField = document.getElementById('ex-ai-key-field');
+  const lmFields = document.getElementById('ex-lm-fields');
+  const hint = document.getElementById('ex-config-hint');
 
-  const syncKeyField = () => {
-    const s = window.aiSettings ? window.aiSettings() : { keys: {} };
+  // Bascule entre « clé API » (cloud) et « URL + modèle » (LM Studio) selon
+  // le fournisseur du modèle sélectionné.
+  const sync = () => {
     const provider = providerOf(modelSel.value);
-    keyInput.value = (s.keys && s.keys[provider]) || '';
-    keyInput.placeholder = provider === 'openai' ? 'Clé API OpenAI (sk-…)' : 'Clé API Claude (sk-ant-…)';
+    const isLm = provider === 'lmstudio';
+    keyField.hidden = isLm;
+    lmFields.hidden = !isLm;
+    if (isLm) {
+      hint.textContent = 'Lance LM Studio, charge un modèle (ex. Qwen 2.5 Instruct), active « Local Server ». Aucune clé, tout reste sur ta machine.';
+    } else {
+      const s = window.aiSettings ? window.aiSettings() : { keys: {} };
+      keyInput.value = (s.keys && s.keys[provider]) || '';
+      keyInput.placeholder = provider === 'openai' ? 'Clé API OpenAI (sk-…)' : 'Clé API Claude (sk-ant-…)';
+      hint.textContent = 'La clé reste sur ton ordinateur (localStorage).';
+    }
   };
-  syncKeyField();
-  modelSel.onchange = syncKeyField;
+  sync();
+  modelSel.onchange = sync;
+
+  const detectBtn = document.getElementById('ex-lm-detect');
+  if (detectBtn) detectBtn.onclick = async () => {
+    try {
+      const ids = await window.aiListLocalModels(document.getElementById('ex-lm-url').value.trim());
+      if (ids.length) { document.getElementById('ex-lm-model').value = ids[0]; showToast('Modèle détecté : ' + ids[0]); }
+      else showToast('Aucun modèle chargé dans LM Studio');
+    } catch (_) { showToast('LM Studio injoignable — « Local Server » activé ?'); }
+  };
 
   document.getElementById('ex-ai-test').onclick = async () => {
     const model = modelSel.value;
     const provider = providerOf(model);
-    const keys = {}; keys[provider] = keyInput.value.trim();
-    window.aiSaveSettings({ model, keys });
-    if (!window.aiIsConfigured()) { showToast('Colle d\'abord ta clé API'); return; }
-    showToast('Test de la clé…');
+    if (provider === 'lmstudio') {
+      const url = document.getElementById('ex-lm-url').value.trim() || 'http://localhost:1234/v1';
+      const lmModel = document.getElementById('ex-lm-model').value.trim();
+      window.aiSaveSettings({ model, lm: { url, model: lmModel } });
+      showToast('Test de LM Studio…');
+    } else {
+      const keys = {}; keys[provider] = keyInput.value.trim();
+      window.aiSaveSettings({ model, keys });
+      if (!window.aiIsConfigured()) { showToast('Colle d\'abord ta clé API'); return; }
+      showToast('Test de la clé…');
+    }
     try {
       await window.aiCall({ user: 'Réponds uniquement : ok', maxTokens: 16 });
-      showToast('Clé valide — assistant IA actif');
+      showToast(provider === 'lmstudio' ? 'LM Studio connecté — assistant IA actif' : 'Clé valide — assistant IA actif');
       initExercise();
     } catch (e) {
       showToast(e.message);
