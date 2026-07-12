@@ -455,6 +455,34 @@ app.post('/api/anki', wrap(async (req, res) => {
   res.json({ result: await anki(req.body.action, req.body.params || {}) });
 }));
 
+// --- Proxy LM Studio (modèle local) ---
+// LM Studio ne renvoie pas d'en-têtes CORS : un fetch direct depuis le
+// navigateur est bloqué. On relaie donc serveur→serveur (pas de CORS). URL
+// restreinte au localhost par sécurité.
+function isLocalUrl(u) {
+  try { const h = new URL(u).hostname; return h === 'localhost' || h === '127.0.0.1' || h === '::1'; }
+  catch { return false; }
+}
+app.post('/api/lm/chat', wrap(async (req, res) => {
+  const { url, payload } = req.body || {};
+  if (!isLocalUrl(url)) throw new Error('URL LM Studio invalide (doit être locale)');
+  let r;
+  try {
+    r = await fetch(url.replace(/\/+$/, '') + '/chat/completions', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload)
+    });
+  } catch { throw new Error('LM Studio injoignable — lance-le et active « Local Server »'); }
+  res.status(r.status).type('application/json').send(await r.text());
+}));
+app.get('/api/lm/models', wrap(async (req, res) => {
+  const url = req.query.url;
+  if (!isLocalUrl(url)) throw new Error('URL LM Studio invalide (doit être locale)');
+  let r;
+  try { r = await fetch(url.replace(/\/+$/, '') + '/models'); }
+  catch { throw new Error('LM Studio injoignable'); }
+  res.status(r.status).type('application/json').send(await r.text());
+}));
+
 // Phrase générée (exercice de thème) -> carte Anki Fr/En
 app.post('/api/sentence', wrap(async (req, res) => {
   const { fr, en } = req.body;

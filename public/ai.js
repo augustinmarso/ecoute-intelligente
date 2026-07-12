@@ -53,11 +53,11 @@ function aiIsConfigured() {
   return !!s.keys[p];
 }
 
-// Liste les modèles chargés dans LM Studio (GET /v1/models). Sert au bouton
-// « détecter » de la config.
+// Liste les modèles chargés dans LM Studio. Passe par le proxy du serveur de
+// l'app (/api/lm/models) car LM Studio ne renvoie pas d'en-têtes CORS.
 async function aiListLocalModels(url) {
   const base = (url || _aiSettings().lm.url || 'http://localhost:1234/v1').replace(/\/+$/, '');
-  const r = await fetch(base + '/models');
+  const r = await fetch('/api/lm/models?url=' + encodeURIComponent(base));
   if (!r.ok) throw new Error('LM Studio injoignable');
   const j = await r.json();
   return (j.data || []).map(m => m.id);
@@ -115,17 +115,20 @@ async function aiCall({ system, user, schema, maxTokens, model: modelOverride })
       ]
     };
     if (schema) body.response_format = { type: 'json_schema', json_schema: { name: 'reponse', strict: true, schema } };
-    let data;
-    try {
-      data = await _aiHttp(base + '/chat/completions', {}, body);
-    } catch (e) {
-      throw new Error(/failed to fetch|networkerror|load failed|econnrefused/i.test(e.message)
-        ? `LM Studio injoignable — lance-le et active « Local Server » (${base})`
-        : e.message);
+    // Via le proxy du serveur de l'app (LM Studio n'autorise pas le CORS).
+    const resp = await fetch('/api/lm/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: base, payload: body })
+    });
+    if (!resp.ok) {
+      let msg = `LM Studio : erreur ${resp.status}`;
+      try { const j = await resp.json(); if (j.error) msg = j.error; } catch (_) {}
+      throw new Error(msg);
     }
-    const msg = data.choices && data.choices[0] && data.choices[0].message;
-    if (!msg) throw new Error('Réponse LM Studio vide — un modèle est-il chargé ?');
-    return _aiParse(msg.content || '', schema);
+    const data = await resp.json();
+    const m = data.choices && data.choices[0] && data.choices[0].message;
+    if (!m) throw new Error('Réponse LM Studio vide — un modèle est-il chargé ?');
+    return _aiParse(m.content || '', schema);
   }
 
   const key = s.keys[provider];
