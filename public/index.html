@@ -157,9 +157,11 @@
   .empty-state { text-align: center; color: var(--text2); font-size: 13.5px; padding: 2rem 1rem; background: var(--bg2); border-radius: var(--radius-lg); line-height: 1.6; }
 
   /* ---------- Lecteur ---------- */
-  #view-player { display: flex; min-height: 0; }
-  /* La colonne vidéo ne scrolle JAMAIS : la vidéo reste fixe à l'écran,
-     seul le transcript défile dans le panneau latéral. */
+  /* L'écran n'est PLUS séparé en deux : la vidéo occupe toute la largeur ;
+     le transcript est un tiroir qui glisse par-dessus (position: absolute),
+     il ne coupe donc pas la mise en page. */
+  #view-player { position: relative; display: flex; min-height: 0; }
+  /* La colonne vidéo ne scrolle JAMAIS : la vidéo reste fixe à l'écran. */
   .player-col { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; padding: 1rem 1.5rem 1rem; }
   .player-topline { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
   .btn-back { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none; color: var(--text2); font-size: 13px; font-weight: 500; padding: 6px 10px 6px 4px; border-radius: var(--radius); transition: background .12s, color .12s; }
@@ -212,10 +214,15 @@
   .shortcuts-row { display: flex; flex-wrap: wrap; gap: 8px 18px; justify-content: center; font-size: 12px; color: var(--text3); margin-top: auto; padding-top: .5rem; flex-shrink: 0; }
   .shortcuts-row span { display: inline-flex; align-items: center; gap: 5px; }
 
-  /* Panneau latéral transcript */
-  .side-panel { width: 360px; flex-shrink: 0; background: var(--bg); box-shadow: inset 1px 0 0 var(--border); display: flex; flex-direction: column; min-height: 0; transition: width .18s, opacity .18s; }
-  .side-panel.collapsed { width: 0; opacity: 0; overflow: hidden; }
-  .panel-toggle { position: fixed; top: 70px; right: 12px; z-index: 30; }
+  /* Transcript = tiroir superposé (n'entre pas dans le flux, ne sépare donc
+     pas l'écran) : glisse depuis la droite au-dessus de la vidéo. Fermé par
+     défaut (classe .collapsed posée dans le HTML). */
+  .side-panel { position: absolute; top: 0; right: 0; height: 100%; width: 360px; max-width: 88%; z-index: 35; background: var(--bg); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; min-height: 0; transition: transform .22s ease, opacity .22s ease; }
+  .side-panel.collapsed { transform: translateX(100%); opacity: 0; pointer-events: none; }
+  /* Voile derrière le tiroir ouvert (clic = ferme) */
+  .panel-backdrop { position: absolute; inset: 0; z-index: 34; background: rgba(20,15,10,.28); backdrop-filter: blur(1px); -webkit-backdrop-filter: blur(1px); opacity: 0; transition: opacity .22s ease; pointer-events: none; }
+  .panel-backdrop.show { opacity: 1; pointer-events: auto; }
+  .panel-toggle { position: fixed; top: 70px; right: 12px; z-index: 40; background: var(--bg2); box-shadow: var(--shadow-sm); }
   .panel-header { padding: 14px 16px 12px; box-shadow: inset 0 -1px 0 var(--border); }
   .panel-session { display: flex; align-items: center; gap: 12px; }
   .session-ring-wrap { position: relative; width: 44px; height: 44px; flex-shrink: 0; }
@@ -480,13 +487,10 @@
   }
 
   @media (max-width: 999px) {
-    #view-player { flex-direction: column; }
-    /* Sur écran étroit on revient au flux classique : colonne scrollable,
-       vidéo dimensionnée par la largeur (le mode « vidéo fixe » est desktop). */
+    /* Sur écran étroit : colonne scrollable, vidéo pleine largeur ; le
+       transcript reste un tiroir superposé (jamais de séparation d'écran). */
     .player-col { overflow-y: auto; }
     .yt-wrap { flex: 0 0 auto; width: 100%; align-self: stretch; }
-    .side-panel { width: 100%; max-height: 46vh; box-shadow: inset 0 1px 0 var(--border); order: 2; }
-    .side-panel.collapsed { width: 100%; height: 0; max-height: 0; }
     .panel-toggle { top: auto; bottom: 12px; right: 12px; }
   }
   @media (max-width: 560px) {
@@ -591,8 +595,9 @@
       </div>
 
       <button class="icon-btn panel-toggle" id="btn-toggle-panel" title="Afficher/masquer le transcript"><span class="ms">list_alt</span></button>
+      <div class="panel-backdrop" id="panel-backdrop"></div>
 
-      <aside class="side-panel" id="side-panel">
+      <aside class="side-panel collapsed" id="side-panel">
         <div class="panel-header">
           <div class="panel-session">
             <div class="session-ring-wrap">

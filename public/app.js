@@ -591,8 +591,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target.id === 'stats-modal') document.getElementById('stats-modal').hidden = true;
   });
 
+  // Transcript = tiroir superposé (n'ouvre pas une 2e colonne). Le voile suit
+  // l'état ouvert/fermé et se ferme au clic.
+  const _syncPanel = () => {
+    const open = !document.getElementById('side-panel').classList.contains('collapsed');
+    document.getElementById('panel-backdrop').classList.toggle('show', open);
+  };
   document.getElementById('btn-toggle-panel').onclick = () => {
     document.getElementById('side-panel').classList.toggle('collapsed');
+    _syncPanel();
+  };
+  document.getElementById('panel-backdrop').onclick = () => {
+    document.getElementById('side-panel').classList.add('collapsed');
+    _syncPanel();
   };
 
   document.getElementById('btn-retry').onclick = () => { if (currentVideoId) openVideo(currentVideoId, resumeAtLoad); };
