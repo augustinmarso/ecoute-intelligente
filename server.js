@@ -5,12 +5,22 @@
  */
 const express = require('express');
 const { execFile } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
 const fs = require('fs');
 const path = require('path');
 
+// ffmpeg-static renvoie un chemin dans app.asar quand l'app est packagée
+// (Electron), mais le binaire réel est dépaqueté dans app.asar.unpacked et
+// execFile ne traverse pas l'asar : on redirige vers le chemin dépaqueté.
+const ffmpegPath = require('ffmpeg-static').replace('app.asar', 'app.asar.unpacked');
+
 const PORT = +process.env.PORT || 3311;
-const CACHE = path.join(__dirname, 'cache');
+// Racine INSCRIPTIBLE : en app packagée, __dirname est dans l'asar (lecture
+// seule) — Electron fournit alors un dossier utilisateur via EI_DATA_ROOT.
+// En mode `node server.js`, on écrit dans le dossier du projet comme avant.
+const ROOT = process.env.EI_DATA_ROOT || __dirname;
+const CACHE = path.join(ROOT, 'cache');
+const DATA = path.join(ROOT, 'data');            // persistance locale (remplace le localStorage fragile)
+const STORE = path.join(DATA, 'store.json');
 const ANKI_URL = 'http://127.0.0.1:8765';
 const DECK_PHRASES = 'Écoute Intelligente::Phrases';
 const DECK_MOTS = 'Écoute Intelligente::Mots';
@@ -18,6 +28,20 @@ const MODEL_PHRASE = 'EI Phrase';
 const MODEL_MOT = 'EI Mot';
 
 fs.mkdirSync(CACHE, { recursive: true });
+fs.mkdirSync(DATA, { recursive: true });
+
+/* ---------- Store local (progression) : fichier JSON sur disque ----------
+ * Remplace le localStorage du navigateur : la progression (XP, série, phrases
+ * capturées, phrases générées, police, clé IA…) survit à un vidage de cache et
+ * ne dépend plus du navigateur. Chaque valeur est la chaîne localStorage brute. */
+function readStore() {
+  try { return JSON.parse(fs.readFileSync(STORE, 'utf8')); } catch { return {}; }
+}
+function writeStore(obj) {
+  const tmp = STORE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(obj));
+  fs.renameSync(tmp, STORE); // écriture atomique
+}
 
 function run(cmd, args, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
@@ -408,8 +432,36 @@ app.post('/api/anki', wrap(async (req, res) => {
   res.json({ result: await anki(req.body.action, req.body.params || {}) });
 }));
 
-if (require.main === module) {
-  app.listen(PORT, () => console.log(`Écoute Intelligente → http://localhost:${PORT}`));
+// --- Persistance de la progression (store local) ---
+// GET : renvoie tout le store. POST : applique un patch (clé -> valeur ;
+// valeur null = suppression), fusionné dans le fichier.
+app.get('/api/state', wrap(async (req, res) => {
+  res.json(readStore());
+}));
+app.post('/api/state', wrap(async (req, res) => {
+  const store = readStore();
+  const patch = req.body || {};
+  for (const k of Object.keys(patch)) {
+    if (patch[k] == null) delete store[k];
+    else store[k] = patch[k];
+  }
+  writeStore(store);
+  res.json({ ok: true });
+}));
+
+// Démarre le serveur ; résout avec l'instance http (utilisé par Electron).
+function startServer(port = PORT) {
+  return new Promise((resolve, reject) => {
+    const srv = app.listen(port, () => {
+      console.log(`Écoute Intelligente → http://localhost:${port}`);
+      resolve(srv);
+    });
+    srv.on('error', reject);
+  });
 }
 
-module.exports = { parseJson3, mergeSentences, refineAudioBounds, buildWordTimeline };
+if (require.main === module) {
+  startServer().catch(e => { console.error(e.message); process.exit(1); });
+}
+
+module.exports = { app, startServer, PORT, parseJson3, mergeSentences, refineAudioBounds, buildWordTimeline };
