@@ -57,17 +57,50 @@ let exBlocks = null;         // mode « blocs » : { fr, en, words, bank, answer
  * ------------------------------------------------------------- */
 
 const EX_SAVED_KEY = 'ei-sentences-v1';
+// Une phrase redevient « à revoir » ~20 h après sa dernière révision réussie.
+const EX_REVIEW_AFTER_MS = 20 * 3600 * 1000;
+const _snoozedReviews = new Set(); // « Plus tard » — mémoire de session seulement
+let _currentDue = null;            // phrase proposée par la carte Révision
 
 function getSavedSentences() {
   try { return JSON.parse(localStorage.getItem(EX_SAVED_KEY) || '[]'); }
   catch (_) { return []; }
 }
 
+function writeSavedSentences(list) {
+  try { localStorage.setItem(EX_SAVED_KEY, JSON.stringify(list.slice(0, 100))); } catch (_) {}
+}
+
+// Entrée : { fr, en, ts, reviews, lastReview, ankiId } (les anciennes entrées
+// sans ts sont considérées dues immédiatement).
 function saveGeneratedSentence(fr, en) {
   if (!fr || !en) return;
   const list = getSavedSentences().filter(s => s.en !== en);
-  list.unshift({ fr, en });
-  try { localStorage.setItem(EX_SAVED_KEY, JSON.stringify(list.slice(0, 100))); } catch (_) {}
+  list.unshift({ fr, en, ts: Date.now(), reviews: 0, lastReview: null, ankiId: null });
+  writeSavedSentences(list);
+}
+
+function updateSavedSentence(en, patch) {
+  const list = getSavedSentences();
+  const i = list.findIndex(s => s.en === en);
+  if (i < 0) return;
+  Object.assign(list[i], patch);
+  writeSavedSentences(list);
+}
+
+// Révision réussie (thème corrigé ou blocs reconstruits) -> repousse l'échéance.
+function markSentenceReviewed(en) {
+  const cur = getSavedSentences().find(s => s.en === en);
+  if (!cur) return;
+  updateSavedSentence(en, { lastReview: Date.now(), reviews: (cur.reviews || 0) + 1 });
+}
+
+// Phrases dues, la plus « en retard » d'abord.
+function getDueSentences() {
+  const now = Date.now();
+  return getSavedSentences()
+    .filter(s => !_snoozedReviews.has(s.en) && now - (s.lastReview || s.ts || 0) > EX_REVIEW_AFTER_MS)
+    .sort((a, b) => (a.lastReview || a.ts || 0) - (b.lastReview || b.ts || 0));
 }
 
 function _hasSpeechRecognition() {
@@ -189,6 +222,7 @@ async function gradeAnswer() {
     });
     exCorrection = result;
     exPhase = 'corrected';
+    markSentenceReviewed(exCurrent.en); // thème travaillé -> échéance repoussée
     const points = (result.score || 0) * 2;
     exSessionPoints += points;
     addXp(points);
@@ -280,7 +314,20 @@ function renderExercise() {
   // exListState === 'ready'
   let html = '';
   if (exPhase === 'idle') {
-    html = renderSettingsRow(false) +
+    // Carte « Révision » : redonne de temps en temps les phrases générées
+    // (dues ~20 h après leur dernière révision réussie).
+    const due = getDueSentences();
+    _currentDue = due[0] || null;
+    const reviewHtml = _currentDue ? `
+      <div class="ex-review-card">
+        <div class="ex-review-head">${icon('history_edu', 16)} Révision — ${due.length} phrase${due.length > 1 ? 's' : ''} à revoir</div>
+        <div class="ex-review-fr">${escapeHtml(_currentDue.fr)}</div>
+        <div class="ex-next-actions">
+          <button class="btn-main" id="ex-review-play">${icon('extension', 15)} Rejouer en blocs</button>
+          <button class="btn-main" id="ex-review-later">${icon('schedule', 15)} Plus tard</button>
+        </div>
+      </div>` : '';
+    html = renderSettingsRow(false) + reviewHtml +
       `<div class="ex-main-actions">
         <button class="btn-main" id="ex-new-sentence">${icon('auto_awesome', 16)} Nouvelle phrase</button>
         ${getSavedSentences().length ? `<button class="btn-main" id="ex-replay-blocks">${icon('extension', 16)} Rejouer en blocs</button>` : ''}
@@ -375,6 +422,7 @@ function renderCorrected() {
       ${errorsHtml}
       <div class="ex-next-actions">
         <button class="btn-main" id="ex-to-blocks">${icon('extension', 16)} Reconstruire en blocs</button>
+        ${sentenceAnkiBtnHtml(exCurrent.en)}
         <button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button>
       </div>
     </div>
@@ -416,12 +464,16 @@ function renderBlocks() {
   if (b.result === 'ok') {
     footer = `<div class="ex-blocks-result ok">${icon('check_circle', 18)} Parfait ! +8 XP</div>
       ${ankiHint}
-      <div class="ex-next-actions"><button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button></div>`;
+      <div class="ex-next-actions">
+        ${sentenceAnkiBtnHtml(b.en)}
+        <button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button>
+      </div>`;
   } else if (b.result === 'ko') {
     footer = `<div class="ex-blocks-result ko">${icon('cancel', 18)}&nbsp;Pas tout à fait — réponse : <strong>${escapeHtml(b.en)}</strong></div>
       ${ankiHint}
       <div class="ex-next-actions">
         <button class="btn-main" id="ex-blocks-retry">${icon('refresh', 16)} Réessayer</button>
+        ${sentenceAnkiBtnHtml(b.en)}
         <button class="btn-main" id="ex-next-sentence">${icon('arrow_forward', 16)} Phrase suivante</button>
       </div>`;
   } else {
@@ -444,6 +496,7 @@ function checkBlocks() {
     b.result = 'ok';
     exSessionPoints += 8;
     addXp(8);
+    markSentenceReviewed(b.en); // révision réussie -> échéance repoussée
   } else {
     b.result = 'ko';
   }
@@ -457,10 +510,43 @@ function blockWordToAnki(raw) {
   window.addWordDirect(clean, exBlocks ? exBlocks.en : '', 'Exercice blocs');
 }
 
+/* ---------- Phrase générée -> carte Anki (deck « Phrases générées ») ---------- */
+
+function sentenceAnkiBtnHtml(en) {
+  const saved = getSavedSentences().find(x => x.en === en);
+  const added = !!(saved && saved.ankiId);
+  return `<button class="btn-main" id="ex-sentence-anki" data-en="${escapeHtml(en)}"${added ? ' disabled' : ''}>${icon(added ? 'check' : 'style', 15)} ${added ? 'Phrase dans Anki' : 'Phrase → Anki'}</button>`;
+}
+
+async function sentenceToAnki(btn) {
+  const en = btn.dataset.en;
+  const saved = getSavedSentences().find(x => x.en === en);
+  const fr = saved ? saved.fr
+    : (exBlocks && exBlocks.en === en ? exBlocks.fr : (exCurrent && exCurrent.en === en ? exCurrent.fr : ''));
+  if (!fr) { showToast('Phrase introuvable'); return; }
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/sentence', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fr, en })
+    }).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+    updateSavedSentence(en, { ankiId: res.noteId || true });
+    if (res.duplicate) showToast('Phrase déjà dans Anki');
+    else { addXp(5); showToast('Phrase ajoutée à Anki +5 XP'); }
+    btn.innerHTML = `${icon('check', 15)} Phrase dans Anki`;
+  } catch (e) {
+    btn.disabled = false;
+    showToast('Erreur : ' + (e.message || 'Anki est-il ouvert ?'));
+  }
+}
+
 function replaySavedBlocks() {
-  const list = getSavedSentences();
+  const due = getDueSentences();
+  const list = due.length ? due : getSavedSentences();
   if (!list.length) { showToast("Aucune phrase enregistrée pour l'instant"); return; }
-  const s = list[Math.floor(Math.random() * list.length)];
+  // priorité aux phrases dues (la plus ancienne), sinon au hasard
+  const s = due.length ? due[0] : list[Math.floor(Math.random() * list.length)];
   startBlocks(s.fr, s.en);
 }
 
@@ -480,6 +566,14 @@ function wireReadyState(body) {
   if (toBlocks) toBlocks.onclick = () => startBlocks(exCurrent.fr, exCurrent.en);
   const replayBlocks = document.getElementById('ex-replay-blocks');
   if (replayBlocks) replayBlocks.onclick = replaySavedBlocks;
+
+  // Carte « Révision » (accueil des exercices) + bouton « Phrase → Anki »
+  const reviewPlay = document.getElementById('ex-review-play');
+  if (reviewPlay) reviewPlay.onclick = () => { if (_currentDue) startBlocks(_currentDue.fr, _currentDue.en); };
+  const reviewLater = document.getElementById('ex-review-later');
+  if (reviewLater) reviewLater.onclick = () => { if (_currentDue) _snoozedReviews.add(_currentDue.en); renderExercise(); };
+  const sentenceAnki = document.getElementById('ex-sentence-anki');
+  if (sentenceAnki) sentenceAnki.onclick = () => sentenceToAnki(sentenceAnki);
   const blocksCheck = document.getElementById('ex-blocks-check');
   if (blocksCheck) blocksCheck.onclick = checkBlocks;
   const blocksRetry = document.getElementById('ex-blocks-retry');

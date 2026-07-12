@@ -24,8 +24,10 @@ const STORE = path.join(DATA, 'store.json');
 const ANKI_URL = 'http://127.0.0.1:8765';
 const DECK_PHRASES = 'Écoute Intelligente::Phrases';
 const DECK_MOTS = 'Écoute Intelligente::Mots';
+const DECK_THEME = 'Écoute Intelligente::Phrases générées';
 const MODEL_PHRASE = 'EI Phrase';
 const MODEL_MOT = 'EI Mot';
+const MODEL_THEME = 'EI Phrase générée';
 
 fs.mkdirSync(CACHE, { recursive: true });
 fs.mkdirSync(DATA, { recursive: true });
@@ -237,6 +239,7 @@ async function ensureAnki() {
   if (ankiReady) return;
   await anki('createDeck', { deck: DECK_PHRASES });
   await anki('createDeck', { deck: DECK_MOTS });
+  await anki('createDeck', { deck: DECK_THEME });
   const models = await anki('modelNames');
   if (!models.includes(MODEL_PHRASE)) {
     await anki('createModel', {
@@ -266,6 +269,20 @@ async function ensureAnki() {
     // Aligne le modèle déjà présent dans Anki sur le gabarit courant.
     await anki('updateModelTemplates', {
       model: { name: MODEL_MOT, templates: { Mot: { Front: MOT_FRONT, Back: MOT_BACK } } }
+    });
+  }
+  // Phrases générées par l'IA (exercice de thème) : recto = phrase française,
+  // verso = traduction anglaise de référence. Dédup Anki sur le 1er champ (Fr).
+  if (!models.includes(MODEL_THEME)) {
+    await anki('createModel', {
+      modelName: MODEL_THEME,
+      inOrderFields: ['Fr', 'En', 'Source'],
+      css: CARD_CSS,
+      cardTemplates: [{
+        Name: 'Thème',
+        Front: '<div class="ei-text">{{Fr}}</div>',
+        Back: `{{FrontSide}}<hr id="answer"><div class="ei-text">{{En}}</div><div class="ei-src">{{Source}}</div>`
+      }]
     });
   }
   ankiReady = true;
@@ -430,6 +447,27 @@ app.get('/api/media/:filename', wrap(async (req, res) => {
 // Proxy générique AnkiConnect (stats, recherches...)
 app.post('/api/anki', wrap(async (req, res) => {
   res.json({ result: await anki(req.body.action, req.body.params || {}) });
+}));
+
+// Phrase générée (exercice de thème) -> carte Anki Fr/En
+app.post('/api/sentence', wrap(async (req, res) => {
+  const { fr, en } = req.body;
+  if (!fr || !en) throw new Error('fr et en requis');
+  await ensureAnki();
+  let noteId = null, duplicate = false;
+  try {
+    noteId = await anki('addNote', {
+      note: {
+        deckName: DECK_THEME, modelName: MODEL_THEME,
+        fields: { Fr: esc(fr), En: esc(en), Source: 'Exercice — phrase générée' },
+        tags: ['ecoute-intelligente', 'theme'],
+        options: { allowDuplicate: false, duplicateScope: 'deck' }
+      }
+    });
+  } catch (e) {
+    if (/duplicate/i.test(e.message)) duplicate = true; else throw e;
+  }
+  res.json({ noteId, duplicate });
 }));
 
 // --- Persistance de la progression (store local) ---
