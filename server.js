@@ -222,17 +222,40 @@ async function anki(action, params = {}) {
   return d.result;
 }
 
+// Police super-lisible Atkinson Hyperlegible, embarquée dans le média Anki
+// (fichiers préfixés « _ » = conservés par Anki). Fallback système si absente.
 const CARD_CSS = `
-.card { font-family: Georgia, serif; font-size: 20px; text-align: center;
+@font-face { font-family: "EIAtkinson"; src: url("_ei-atkinson-400.woff2"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "EIAtkinson"; src: url("_ei-atkinson-700.woff2"); font-weight: 700; font-style: normal; }
+.card { font-family: "EIAtkinson", "Atkinson Hyperlegible", "Segoe UI", Arial, sans-serif;
+  font-size: 21px; line-height: 1.55; letter-spacing: .01em; text-align: center;
   color: #2A2520; background: #FBF8F2; padding: 12px; }
 img { max-width: 100%; border-radius: 12px; }
 .ei-text { font-size: 22px; margin: 14px 0 6px; }
-.ei-trad { color: #6F665A; font-size: 17px; font-style: italic; }
+.ei-trad { color: #6F665A; font-size: 18px; }
 .ei-src { color: #9C8F78; font-size: 13px; margin-top: 14px; }
 .ei-word { font-size: 30px; color: #C0603A; font-weight: bold; }
 .ei-phon { color: #9C8F78; font-size: 16px; }
 .ei-def { text-align: left; font-size: 17px; margin: 10px 0; }
 .ei-ex { color: #6F665A; font-style: italic; font-size: 16px; }`;
+
+// Embarque la police super-lisible dans le média Anki (une seule fois).
+// Téléchargée côté serveur (internet OK) puis stockée en base64.
+const EI_FONTS = [
+  { name: '_ei-atkinson-400.woff2', url: 'https://cdn.jsdelivr.net/npm/@fontsource/atkinson-hyperlegible/files/atkinson-hyperlegible-latin-400-normal.woff2' },
+  { name: '_ei-atkinson-700.woff2', url: 'https://cdn.jsdelivr.net/npm/@fontsource/atkinson-hyperlegible/files/atkinson-hyperlegible-latin-700-normal.woff2' }
+];
+async function ensureFonts() {
+  for (const f of EI_FONTS) {
+    try { if (await anki('retrieveMediaFile', { filename: f.name })) continue; } catch {}
+    try {
+      const r = await fetch(f.url);
+      if (!r.ok) continue;
+      const b64 = Buffer.from(await r.arrayBuffer()).toString('base64');
+      await anki('storeMediaFile', { filename: f.name, data: b64 });
+    } catch { /* hors ligne : fallback police système */ }
+  }
+}
 
 let ankiReady = false;
 async function ensureAnki() {
@@ -240,14 +263,14 @@ async function ensureAnki() {
   await anki('createDeck', { deck: DECK_PHRASES });
   await anki('createDeck', { deck: DECK_MOTS });
   await anki('createDeck', { deck: DECK_THEME });
+  await ensureFonts(); // police super-lisible dans le média Anki
   const models = await anki('modelNames');
-  // Carte phrase (thème inversé, demande utilisateur) : recto = traduction
-  // française + screenshot ; verso = image + audio (joué automatiquement) +
-  // phrase anglaise. La traduction FR n'apparaît qu'au recto (PAS de
-  // {{FrontSide}} au verso, sinon elle serait affichée deux fois).
+  // Carte phrase (thème inversé) : recto = traduction française + screenshot ;
+  // verso = {{FrontSide}} (la phrase FR + l'image RESTENT visibles, demande
+  // utilisateur) + audio (joué auto) + phrase anglaise.
   // updateModelTemplates aligne aussi les cartes déjà créées.
   const PHRASE_FRONT = `<div class="ei-text">{{Translation}}</div>{{Image}}`;
-  const PHRASE_BACK = `{{Image}}<hr id="answer">{{Audio}}<div class="ei-text">{{Text}}</div><div class="ei-src">{{Source}}</div>`;
+  const PHRASE_BACK = `{{FrontSide}}<hr id="answer">{{Audio}}<div class="ei-text">{{Text}}</div><div class="ei-src">{{Source}}</div>`;
   if (!models.includes(MODEL_PHRASE)) {
     await anki('createModel', {
       modelName: MODEL_PHRASE,
@@ -290,6 +313,13 @@ async function ensureAnki() {
         Back: `{{FrontSide}}<hr id="answer"><div class="ei-text">{{En}}</div><div class="ei-src">{{Source}}</div>`
       }]
     });
+  }
+  // Pousse le CSS (police super-lisible) aux modèles DÉJÀ existants
+  // (updateModelTemplates ne touche pas au style).
+  for (const name of [MODEL_PHRASE, MODEL_MOT, MODEL_THEME]) {
+    if (models.includes(name)) {
+      try { await anki('updateModelStyling', { model: { name, css: CARD_CSS } }); } catch {}
+    }
   }
   ankiReady = true;
 }
