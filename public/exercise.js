@@ -51,6 +51,7 @@ let exGradeError = '';
 let exRecognition = null;
 let exRecognizing = false;
 let exBlocks = null;         // mode « blocs » : { fr, en, words, bank, answer, result }
+let exForceConfig = false;   // ouvre l'écran de choix du moteur IA à la demande
 
 /* ---------------------------------------------------------------
  * Phrases générées enregistrées (rejouables en mode blocs)
@@ -118,6 +119,7 @@ function initExercise() {
   exCorrection = null;
   exGenError = '';
   exGradeError = '';
+  exForceConfig = false;
   if (window.aiIsConfigured && window.aiIsConfigured()) {
     loadExerciseWordList();
   } else {
@@ -290,7 +292,9 @@ function renderExercise() {
   const body = document.getElementById('exercise-body');
   if (!body) return;
 
-  if (!window.aiIsConfigured || !window.aiIsConfigured()) {
+  // Écran de choix du moteur IA : au premier réglage (pas encore configuré)
+  // OU à la demande via le bouton « tune » (exForceConfig).
+  if (exForceConfig || !window.aiIsConfigured || !window.aiIsConfigured()) {
     body.innerHTML = renderConfigState();
     wireConfigState();
     return;
@@ -634,10 +638,12 @@ function renderConfigState() {
   const s = window.aiSettings ? window.aiSettings() : { model: '', lm: {} };
   const lm = s.lm || { url: 'http://localhost:1234/v1', model: '' };
   const optHtml = (arr) => arr.map(([id, label]) => `<option value="${id}" ${s.model === id ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  // Déjà configuré (accès via le bouton « tune ») : on peut annuler.
+  const canCancel = window.aiIsConfigured && window.aiIsConfigured();
   return `
     <div class="ex-config-wrap">
       <div class="ex-config-card">
-        <h3>Configurer l'assistant IA</h3>
+        <h3>Choisir le moteur IA</h3>
         <div class="ex-field">
           <label>Modèle</label>
           <select id="ex-ai-model">
@@ -657,6 +663,7 @@ function renderConfigState() {
           <input type="text" id="ex-lm-model" value="${escapeHtml(lm.model || '')}" placeholder="laisser vide = modèle chargé (ex : qwen2.5-7b-instruct)" autocomplete="off"/>
         </div>
         <button class="btn-main" id="ex-ai-test">${icon('check', 16)} Tester et enregistrer</button>
+        ${canCancel ? `<button class="btn-ghost" id="ex-ai-cancel">Annuler</button>` : ''}
         <p class="ex-config-hint" id="ex-config-hint">La clé reste sur ton ordinateur (localStorage).</p>
       </div>
     </div>
@@ -718,12 +725,20 @@ function wireConfigState() {
     try {
       await window.aiCall({ user: 'Réponds uniquement : ok', maxTokens: 16 });
       showToast(provider === 'lmstudio' ? 'LM Studio connecté — assistant IA actif' : 'Clé valide — assistant IA actif');
+      exForceConfig = false;
       initExercise();
     } catch (e) {
       showToast(e.message);
     }
   };
+
+  const cancelBtn = document.getElementById('ex-ai-cancel');
+  if (cancelBtn) cancelBtn.onclick = () => { exForceConfig = false; renderExercise(); };
 }
+
+// Ouvre l'écran de choix du moteur IA (bouton « tune » de l'en-tête Exercices).
+function openAiConfig() { exForceConfig = true; renderExercise(); }
+window.openAiConfig = openAiConfig;
 
 /* ---------------------------------------------------------------
  * Raccourci « Entrée » = phrase suivante quand la correction est affichée
