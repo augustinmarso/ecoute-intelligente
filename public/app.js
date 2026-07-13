@@ -584,7 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-cards-back').onclick = hideCards;
   document.getElementById('btn-exercise').onclick = showExercise;
   document.getElementById('btn-exercise-back').onclick = hideExercise;
-  document.getElementById('btn-ai-config').onclick = () => { if (window.openAiConfig) window.openAiConfig(); };
+  document.getElementById('ai-status').onclick = () => { if (window.openAiConfig) window.openAiConfig(); };
   document.getElementById('tab-phrases').onclick = () => setCardsTab('phrases');
   document.getElementById('tab-mots').onclick = () => setCardsTab('mots');
   document.getElementById('stats-close').onclick = () => { document.getElementById('stats-modal').hidden = true; };

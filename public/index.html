@@ -375,7 +375,19 @@
   .exercise-col { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; padding: 1.25rem 1.75rem 2.5rem; }
   .exercise-topline { display: flex; align-items: center; gap: 12px; margin-bottom: 1.2rem; }
   .exercise-title { font-family: 'Newsreader', Georgia, serif; font-style: italic; font-size: 19px; font-weight: 500; color: var(--text); }
-  .exercise-points { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--text2); }
+  /* Pastille « moteur IA actif » : montre le modèle connecté + point d'état
+     (vert = connecté, rouge = hors ligne / pas de clé, ambre = vérification). */
+  .ai-status { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px; border: none; border-radius: 999px; background: var(--bg2); box-shadow: inset 0 0 0 1px var(--border); color: var(--text); font-family: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background .12s; }
+  .ai-status:hover { background: var(--hover-strong); }
+  .ai-status .ms { color: var(--text3); margin-left: -2px; }
+  .ai-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+  .ai-status.ok .ai-status-dot { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent); }
+  .ai-status.down .ai-status-dot { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent); }
+  .ai-status.checking .ai-status-dot { background: var(--warning); animation: aiPing 1s ease-in-out infinite; }
+  @keyframes aiPing { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  .ai-status-label { white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+
+  .exercise-points { font-size: 13px; font-weight: 600; color: var(--text2); }
 
   .ex-config-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
   .ex-config-card { width: 100%; max-width: 420px; background: var(--bg2); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 24px 26px; text-align: center; }
@@ -640,7 +652,11 @@
         <div class="exercise-topline">
           <button class="btn-back" id="btn-exercise-back"><span class="ms" style="font-size:18px">arrow_back</span> Retour</button>
           <span class="exercise-title">Exercices</span>
-          <button class="icon-btn" id="btn-ai-config" title="Choisir le moteur IA (OpenAI / LM Studio / Claude)"><span class="ms">tune</span></button>
+          <button class="ai-status" id="ai-status" title="Moteur IA actif — cliquer pour changer">
+            <span class="ai-status-dot"></span>
+            <span class="ai-status-label">IA</span>
+            <span class="ms" style="font-size:15px">expand_more</span>
+          </button>
           <span class="exercise-points" id="exercise-points">Points de la session : 0</span>
         </div>
 

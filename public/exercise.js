@@ -120,6 +120,7 @@ function initExercise() {
   exGenError = '';
   exGradeError = '';
   exForceConfig = false;
+  renderAiStatus(); // met à jour la pastille « moteur IA actif » (async)
   if (window.aiIsConfigured && window.aiIsConfigured()) {
     loadExerciseWordList();
   } else {
@@ -726,6 +727,7 @@ function wireConfigState() {
       await window.aiCall({ user: 'Réponds uniquement : ok', maxTokens: 16 });
       showToast(provider === 'lmstudio' ? 'LM Studio connecté — assistant IA actif' : 'Clé valide — assistant IA actif');
       exForceConfig = false;
+      renderAiStatus();
       initExercise();
     } catch (e) {
       showToast(e.message);
@@ -736,9 +738,45 @@ function wireConfigState() {
   if (cancelBtn) cancelBtn.onclick = () => { exForceConfig = false; renderExercise(); };
 }
 
-// Ouvre l'écran de choix du moteur IA (bouton « tune » de l'en-tête Exercices).
+// Ouvre l'écran de choix du moteur IA (pastille d'état de l'en-tête Exercices).
 function openAiConfig() { exForceConfig = true; renderExercise(); }
 window.openAiConfig = openAiConfig;
+
+// Pastille « moteur IA actif » : affiche le modèle connecté + état. Pour LM
+// Studio, ping réel (/api/lm/models) pour savoir s'il est en ligne. La pastille
+// vit dans l'en-tête (hors de #exercise-body), elle survit aux re-render.
+async function renderAiStatus() {
+  const el = document.getElementById('ai-status');
+  if (!el) return;
+  const s = window.aiSettings ? window.aiSettings() : { model: '', keys: {}, lm: {} };
+  const model = s.model;
+  const meta = (window.AI_MODELS || {})[model] || {};
+  const provider = meta.provider || 'anthropic';
+  const set = (state, label, title) => {
+    el.className = 'ai-status ' + state;
+    el.querySelector('.ai-status-label').textContent = label;
+    el.title = title;
+  };
+
+  if (provider === 'lmstudio') {
+    set('checking', 'LM Studio…', 'Vérification de LM Studio…');
+    try {
+      const ids = await window.aiListLocalModels(s.lm && s.lm.url);
+      const m = (s.lm && s.lm.model) || ids[0] || 'modèle ?';
+      set('ok', 'LM Studio · ' + m, `Connecté à LM Studio (${m}) — cliquer pour changer`);
+    } catch (_) {
+      set('down', 'LM Studio hors ligne', 'LM Studio injoignable — lance « Local Server ». Cliquer pour changer');
+    }
+    return;
+  }
+
+  const providerName = provider === 'openai' ? 'OpenAI' : 'Claude';
+  const modelName = (meta.label || model).replace(/\s*\(.*\)\s*$/, '');
+  const hasKey = !!(s.keys && s.keys[provider]);
+  if (hasKey) set('ok', providerName + ' · ' + modelName, `${providerName} — clé configurée. Cliquer pour changer`);
+  else set('down', providerName + ' (pas de clé)', 'Aucune clé API — cliquer pour configurer');
+}
+window.renderAiStatus = renderAiStatus;
 
 /* ---------------------------------------------------------------
  * Raccourci « Entrée » = phrase suivante quand la correction est affichée
