@@ -592,20 +592,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target.id === 'stats-modal') document.getElementById('stats-modal').hidden = true;
   });
 
-  // Transcript = tiroir superposé (n'ouvre pas une 2e colonne). Le voile suit
-  // l'état ouvert/fermé et se ferme au clic.
-  const _syncPanel = () => {
-    const open = !document.getElementById('side-panel').classList.contains('collapsed');
-    document.getElementById('panel-backdrop').classList.toggle('show', open);
-  };
+  // Transcript = colonne à côté de la vidéo (jamais par-dessus). Ouvrir ou
+  // fermer change l'espace disponible : on recale la vidéo (16/9 exact).
   document.getElementById('btn-toggle-panel').onclick = () => {
     document.getElementById('side-panel').classList.toggle('collapsed');
-    _syncPanel();
+    fitVideo();
   };
-  document.getElementById('panel-backdrop').onclick = () => {
-    document.getElementById('side-panel').classList.add('collapsed');
-    _syncPanel();
-  };
+  window.addEventListener('resize', fitVideo);
+  document.addEventListener('fullscreenchange', () => setTimeout(fitVideo, 50));
 
   document.getElementById('btn-retry').onclick = () => { if (currentVideoId) openVideo(currentVideoId, resumeAtLoad); };
 
@@ -782,6 +776,25 @@ function renderSentenceZone() {
  * Chargement d'une vidéo
  * ------------------------------------------------------------- */
 
+// Dimensionne la vidéo en 16/9 EXACT, la plus grande possible dans la scène
+// (jamais de bandes noires ni de déformation). Appelé au chargement, au
+// redimensionnement de la fenêtre et à l'ouverture/fermeture du transcript.
+function fitVideo() {
+  const stage = document.getElementById('video-stage');
+  const wrap = document.querySelector('.yt-wrap');
+  const content = document.getElementById('player-content');
+  if (!stage || !wrap || !content || content.hidden) return;
+  const cw = stage.clientWidth;
+  let w;
+  if (window.matchMedia('(max-width: 999px)').matches) {
+    w = cw; // écran étroit : pleine largeur, hauteur déduite du ratio
+  } else {
+    w = Math.min(cw, Math.round(stage.clientHeight * 16 / 9));
+  }
+  wrap.style.width = Math.max(0, w) + 'px';
+  wrap.style.height = Math.round(w * 9 / 16) + 'px';
+}
+
 async function openVideo(id, resumeAt) {
   currentVideoId = id;
   currentVideoMeta = null;
@@ -812,6 +825,8 @@ async function openVideo(id, resumeAt) {
 
     document.getElementById('player-loading').hidden = true;
     document.getElementById('player-content').hidden = false;
+    requestAnimationFrame(fitVideo); // cale la vidéo une fois la scène visible
+    setTimeout(fitVideo, 400);       // recale après stabilisation du layout (zone de phrase, polices)
 
     renderTranscriptList();
     renderSessionProgress();
