@@ -21,7 +21,8 @@ permissions:
   issues: write
 
 concurrency:
-  group: site
+  # Issues d'autres personnes : groupe à part, pour qu'elles ne puissent pas évincer les préparations en attente.
+  group: ${{ (github.event_name == 'issues' && github.event.issue.user.login != github.repository_owner) && format('issue-{0}', github.event.issue.number) || 'site' }}
   cancel-in-progress: false
 
 jobs:
