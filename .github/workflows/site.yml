@@ -36,8 +36,7 @@ jobs:
           VIDEO: ${{ inputs.video }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
-          if [ -n "$YT_COOKIES" ]; then printf '%s
-' "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"; export YTDLP_COOKIES="$RUNNER_TEMP/cookies.txt"; fi
+          if [ -n "$YT_COOKIES" ]; then printf '%s\n' "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"; export YTDLP_COOKIES="$RUNNER_TEMP/cookies.txt"; fi
           node scripts/prepare-video.js "$VIDEO"
       - name: Enregistrer dans le dépôt
         run: |
