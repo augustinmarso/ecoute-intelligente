@@ -55,14 +55,23 @@ function run(cmd, args, timeoutMs = 60000) {
 }
 
 let YTDLP = null;
+let YTDLP_JS_RUNTIME = false; // yt-dlp >= 2025.06 : Node.js comme runtime JS (extraction YouTube complète)
 async function ytdlp(args, timeoutMs) {
   if (!YTDLP) {
     for (const cand of [['yt-dlp'], ['python', '-m', 'yt_dlp']]) {
       try { await run(cand[0], [...cand.slice(1), '--version'], 15000); YTDLP = cand; break; } catch {}
     }
     if (!YTDLP) throw new Error("yt-dlp introuvable (pip install yt-dlp)");
+    // YouTube exige un runtime JS depuis 2025 (sinon « some formats may be
+    // missing ») : on active Node.js s'il est accepté, sans casser les
+    // anciennes versions qui ne connaissent pas l'option.
+    try {
+      await run(YTDLP[0], [...YTDLP.slice(1), '--js-runtimes', 'node', '--version'], 15000);
+      YTDLP_JS_RUNTIME = true;
+    } catch {}
   }
-  return run(YTDLP[0], [...YTDLP.slice(1), ...args], timeoutMs);
+  const base = YTDLP_JS_RUNTIME ? ['--js-runtimes', 'node'] : [];
+  return run(YTDLP[0], [...YTDLP.slice(1), ...base, ...args], timeoutMs);
 }
 
 /* ---------- Sous-titres ---------- */
@@ -181,7 +190,7 @@ async function getStreamUrls(id, force = false) {
   if (!force && hit && Date.now() - hit.ts < 2 * 3600 * 1000) return hit;
   const { stdout } = await ytdlp([
     '--no-playlist', '-g',
-    '-f', 'b[height<=480][ext=mp4]/b[height<=480]/b,ba[ext=m4a]/ba',
+    '-f', 'bv[height<=480][ext=mp4]/bv[height<=480]/b,ba[ext=m4a]/ba',
     `https://www.youtube.com/watch?v=${id}`
   ], 60000);
   const lines = stdout.trim().split(/\r?\n/);

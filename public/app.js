@@ -86,8 +86,9 @@ const RECENT_MAX = 12;
  * Police de lecture (confort dyslexie) — 3 choix persistés
  * ------------------------------------------------------------- */
 
-const FONT_KEY = 'ei-font-v1';
+const FONT_KEY = 'ei-font-v2'; // v2 : Scoutie Sans devient la police par défaut
 const FONT_OPTIONS = [
+  { id: 'scoutie', family: "'Scoutie Sans', sans-serif", name: 'Scoutie Sans', desc: 'Police de l’app' },
   { id: 'lexend', family: "'Lexend', sans-serif", name: 'Lexend', desc: 'Fluide et moderne' },
   { id: 'atkinson', family: "'Atkinson Hyperlegible', sans-serif", name: 'Atkinson Hyperlegible', desc: 'Lettres impossibles à confondre' },
   { id: 'opendyslexic', family: "'OpenDyslexic', sans-serif", name: 'OpenDyslexic', desc: 'Conçue pour la dyslexie' }

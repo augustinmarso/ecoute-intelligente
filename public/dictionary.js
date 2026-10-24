@@ -41,6 +41,31 @@ function _stripHtml(s) {
   return String(s || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Répare les chaînes « mojibake » : du texte UTF-8 relu comme Latin-1 (ex.
+// « PiÃ¨ce » au lieu de « Pièce », « pleÉªd » au lieu de « pleɪd »). De
+// vieilles versions de l'app ont pu mettre ce genre de données en cache ; on
+// ré-encode Latin-1 -> octets -> UTF-8 pour retrouver le texte d'origine.
+// Ne touche jamais aux chaînes saines (le décodage fatal échoue dessus).
+function _fixMojibake(s) {
+  if (!s || typeof s !== 'string') return s;
+  let suspicious = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    // Accents Latin-1 (0x80-0xFF) : candidats au mojibake. Les vrais textes
+    // français accentués en sont exclus car un seul 0xC0-0xFF suivi d'ASCII
+    // est un séquençage UTF-8 invalide (le décodage fatal rejettera).
+    if (c >= 0x80 && c <= 0xff) { suspicious = true; break; }
+  }
+  if (!suspicious) return s;
+  try {
+    const bytes = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i) & 0xff;
+    const fixed = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    if (fixed === s || fixed.includes('\uFFFD')) return s; // pas du mojibake : on garde l'original
+    return fixed;
+  } catch (_) { return s; }
+}
+
 // ---------- Phonétique (dictionaryapi.dev — dictionnaire, pas d'IA) ----------
 
 async function _fetchPhonetic(word) {
@@ -173,7 +198,17 @@ async function lookupWord(word) {
 
   const cache = _eiLoadCache();
   const hit = cache[clean];
-  if (hit) return { word: clean, phonetic: hit.phonetic || '', translation: hit.translation || '' };
+  if (hit) {
+    // Répare au passage les éventuelles entrées corrompues (mojibake UTF-8)
+    // laissées par d'anciennes versions, puis les réécrit (localStorage + disque).
+    const phonetic = _fixMojibake(hit.phonetic || '');
+    const translation = _fixMojibake(hit.translation || '');
+    if (phonetic !== hit.phonetic || translation !== hit.translation) {
+      cache[clean] = { phonetic, translation, ts: hit.ts || Date.now() };
+      _eiSaveCache(cache);
+    }
+    return { word: clean, phonetic, translation };
+  }
 
   const [phonetic, translation] = await Promise.all([
     _fetchPhonetic(clean).catch(() => ''),

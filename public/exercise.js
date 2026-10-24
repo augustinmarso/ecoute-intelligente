@@ -520,7 +520,10 @@ function blockWordToAnki(raw) {
 function sentenceAnkiBtnHtml(en) {
   const saved = getSavedSentences().find(x => x.en === en);
   const added = !!(saved && saved.ankiId);
-  return `<button class="btn-main" id="ex-sentence-anki" data-en="${escapeHtml(en)}"${added ? ' disabled' : ''}>${icon(added ? 'check' : 'style', 15)} ${added ? 'Phrase dans Anki' : 'Phrase → Anki'}</button>`;
+  // data-en passe dans un attribut HTML : les guillemets de la phrase doivent
+  // être échappés (escapeHtml ne couvre pas les « " »).
+  const safeEn = escapeHtml(en).replace(/"/g, '&quot;');
+  return `<button class="btn-main" id="ex-sentence-anki" data-en="${safeEn}"${added ? ' disabled' : ''}>${icon(added ? 'check' : 'style', 15)} ${added ? 'Phrase dans Anki' : 'Phrase → Anki'}</button>`;
 }
 
 async function sentenceToAnki(btn) {
@@ -791,6 +794,7 @@ document.addEventListener('keydown', (e) => {
   else if (exPhase === 'blocks' && exBlocks) {
     e.preventDefault();
     if (exBlocks.result === 'ok') generateSentence();
-    else if (!exBlocks.bank.length && !exBlocks.result) checkBlocks();
+    // « Entrée » valide quand tous les blocs sont placés (aucun résultat encore)
+    else if (!exBlocks.result && exBlocks.answer.length === exBlocks.words.length) checkBlocks();
   }
 });
