@@ -575,4 +575,4 @@ if (require.main === module) {
   startServer().catch(e => { console.error(e.message); process.exit(1); });
 }
 
-module.exports = { app, startServer, PORT, parseJson3, mergeSentences, refineAudioBounds, buildWordTimeline };
+module.exports = { app, startServer, PORT, parseJson3, mergeSentences, refineAudioBounds, buildWordTimeline, getVideoInfo, ytdlp, run, ffmpegPath, CACHE };

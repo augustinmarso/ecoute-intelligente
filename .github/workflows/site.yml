@@ -1,0 +1,65 @@
+# Site en ligne (GitHub Pages) + préparation des vidéos.
+# Ajouter une vidéo : onglet Actions → « Site » → Run workflow → coller le lien YouTube.
+name: Site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      video:
+        description: "Lien (ou ID) de la vidéo YouTube à ajouter — vide = republier le site"
+        required: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.video != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --omit=dev
+      - run: pip install -U yt-dlp
+      - name: Préparer la vidéo
+        env:
+          VIDEO: ${{ inputs.video }}
+        run: node scripts/prepare-video.js "$VIDEO"
+      - name: Enregistrer dans le dépôt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/videos
+          git commit -m "Vidéo ajoutée : $VIDEO" || exit 0
+          git pull --rebase
+          git push
+        env:
+          VIDEO: ${{ inputs.video }}
+
+  deploy:
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.result != 'failure' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deployment
+        uses: actions/deploy-pages@v4
