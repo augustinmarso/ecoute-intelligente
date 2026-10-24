@@ -1,5 +1,6 @@
 # Site en ligne (GitHub Pages) + préparation des vidéos.
-# Ajouter une vidéo : onglet Actions → « Site » → Run workflow → coller le lien YouTube.
+# Ajouter une vidéo : bouton « Préparer » du site (ouvre une issue pré-remplie, réservée au propriétaire),
+# ou onglet Actions → « Site » → Run workflow → coller le lien YouTube.
 name: Site
 
 on:
@@ -10,11 +11,14 @@ on:
       video:
         description: "Lien (ou ID) de la vidéo YouTube à ajouter — vide = republier le site"
         required: false
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
   pages: write
   id-token: write
+  issues: write
 
 concurrency:
   group: site
@@ -22,7 +26,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.video != '' }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.video != '') || (github.event_name == 'issues' && github.event.issue.user.login == github.repository_owner && startsWith(github.event.issue.title, 'Préparer')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +37,7 @@ jobs:
       - run: pip install -U yt-dlp
       - name: Préparer la vidéo
         env:
-          VIDEO: ${{ inputs.video }}
+          VIDEO: ${{ inputs.video || github.event.issue.title }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
           if [ -n "$YT_COOKIES" ]; then printf '%s\n' "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"; export YTDLP_COOKIES="$RUNNER_TEMP/cookies.txt"; fi
@@ -47,11 +51,21 @@ jobs:
           git pull --rebase
           git push
         env:
-          VIDEO: ${{ inputs.video }}
+          VIDEO: ${{ inputs.video || github.event.issue.title }}
+      - name: Fermer l'issue
+        if: ${{ always() && github.event_name == 'issues' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OK: ${{ job.status }}
+          NUM: ${{ github.event.issue.number }}
+        run: |
+          if [ "$OK" = success ]; then MSG="Vidéo prête, elle s'ouvre sur le site dans 1 minute."
+          else MSG="Échec de la préparation (vidéo sans sous-titres anglais ? cookies YouTube expirés ?) : voir les logs Actions."; fi
+          gh issue close "$NUM" -R "$GITHUB_REPOSITORY" -c "$MSG"
 
   deploy:
     needs: prepare
-    if: ${{ !cancelled() && needs.prepare.result != 'failure' }}
+    if: ${{ !cancelled() && needs.prepare.result != 'failure' && (github.event_name != 'issues' || needs.prepare.result == 'success') }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages

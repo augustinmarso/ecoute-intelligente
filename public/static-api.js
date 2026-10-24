@@ -12,7 +12,7 @@
   if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
   window.EI_STATIC = true;
 
-  const ACTIONS = 'https://github.com/augustinmarso/ecoute-intelligente/actions/workflows/site.yml';
+  const ISSUES = 'https://github.com/augustinmarso/ecoute-intelligente/issues/new';
   const ANKI_URL = 'http://127.0.0.1:8765';
   const DECK_PHRASES = 'Écoute Intelligente::Phrases';
   const DECK_MOTS = 'Écoute Intelligente::Mots';
@@ -90,12 +90,41 @@ img { max-width: 100%; border-radius: 12px; }
 
   async function videoMeta(id) {
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) throw new Error('Lien YouTube invalide');
-    const r = await _fetch(`videos/${id}.json`);
+    // no-store : GitHub Pages met les 404 en cache 10 min, la vidéo doit apparaître dès qu'elle est prête.
+    const r = await _fetch(`videos/${id}.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!r.ok) {
-      throw new Error("Cette vidéo n'est pas encore prête. Sur GitHub, onglet Actions → « Site » → Run workflow, " +
-        'colle son lien, puis reviens dans 2 minutes : ' + ACTIONS);
+      setTimeout(() => offerPrepare(id));
+      throw new Error("Cette vidéo n'est pas encore prête : il faut la préparer une fois sur GitHub (2 à 3 minutes).");
     }
     return r.json();
+  }
+
+  // Bouton « Préparer » : ouvre une issue pré-remplie (le workflow « Site » la traite, réservé au
+  // propriétaire du dépôt), puis le site guette la vidéo et l'ouvre dès qu'elle est en ligne.
+  let poll = null;
+  function offerPrepare(id) {
+    const box = document.getElementById('player-error');
+    if (!box || box.hidden) return;
+    box.querySelector('.ei-prepare')?.remove();
+    clearInterval(poll);
+    const title = 'Préparer : https://www.youtube.com/watch?v=' + id;
+    const href = ISSUES + '?title=' + encodeURIComponent(title) +
+      '&body=' + encodeURIComponent('Valide cette issue (bouton « Create ») : la vidéo sera prête sur le site dans 2 à 3 minutes.');
+    const div = document.createElement('div');
+    div.className = 'ei-prepare';
+    div.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px';
+    div.innerHTML = `<a class="btn-main" style="height:40px;padding:0 22px;text-decoration:none" target="_blank" rel="noopener">
+        <span class="ms" style="font-size:18px">rocket_launch</span> Préparer cette vidéo sur GitHub</a>
+      <span style="font-size:12.5px;color:var(--text3)">Valide sur GitHub, puis reste ici : la vidéo s'ouvrira toute seule.</span>`;
+    div.querySelector('a').href = href;
+    box.querySelector('#btn-retry')?.before(div);
+    poll = setInterval(async () => {
+      if (box.hidden) return clearInterval(poll); // l'utilisateur est parti ailleurs
+      try {
+        const r = await _fetch(`videos/${id}.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (r.ok) { clearInterval(poll); document.getElementById('btn-retry')?.click(); }
+      } catch {}
+    }, 15000);
   }
 
   const media = (id, ms, ext) => new URL(`videos/${id}/${ms}.${ext}`, location.href).href;
