@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Écoute Intelligente",
+  "version": "1.0.0",
+  "description": "Sous-titres instantanés de n'importe quelle vidéo et capture image + son pour le site Écoute Intelligente.",
+  "icons": { "128": "icon.png" },
+  "action": {
+    "default_title": "Écoute Intelligente : cliquer pour activer la capture image + son sur cet onglet",
+    "default_icon": "icon.png"
+  },
+  "permissions": ["tabCapture", "offscreen"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/embed/*", "https://www.youtube-nocookie.com/embed/*"],
+      "js": ["yt-hook.js"],
+      "all_frames": true,
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://augustinmarso.github.io/ecoute-intelligente/*", "http://ei.localhost/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

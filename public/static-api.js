@@ -6,6 +6,9 @@
 //   Actions (scripts/prepare-video.js) dans videos/ ;
 // - Anki : joint directement via AnkiConnect (127.0.0.1:8765), à condition
 //   d'avoir ajouté l'adresse du site dans « webCorsOriginList » d'AnkiConnect.
+// Avec l'extension Chrome (dossier extension/) : n'importe quelle vidéo s'ouvre sans
+// préparation (sous-titres récupérés dans le lecteur YouTube), la capture enregistre
+// l'image et le son de l'onglet, et Anki est joint par l'extension (aucun réglage).
 // En local (npm start / app de bureau), ce fichier ne fait rien.
 // =============================================================
 (function () {
@@ -23,16 +26,132 @@
   const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const _fetch = window.fetch.bind(window);
 
+  /* ---------- Extension Chrome (bridge.js pose data-ei-ext sur <html>) ---------- */
+  const hasExt = () => !!document.documentElement.dataset.eiExt;
+  let extSeq = 0;
+  const extWaiting = new Map();
+  window.addEventListener('message', e => {
+    if (e.source !== window || !e.data || e.data.source !== 'ei-ext' || !extWaiting.has(e.data.id)) return;
+    extWaiting.get(e.data.id)(e.data.res || {});
+    extWaiting.delete(e.data.id);
+  });
+  function extCall(msg) {
+    const id = ++extSeq;
+    return new Promise(resolve => {
+      extWaiting.set(id, resolve);
+      window.postMessage({ source: 'ei-page', id, msg }, location.origin);
+    });
+  }
+
   async function anki(action, params = {}) {
-    let r;
-    try {
-      r = await _fetch(ANKI_URL, { method: 'POST', body: JSON.stringify({ action, version: 6, params }) });
-    } catch {
-      throw new Error("Anki injoignable : ouvre Anki et ajoute « " + location.origin + " » dans webCorsOriginList d'AnkiConnect");
+    let d;
+    if (hasExt()) {
+      d = await extCall({ type: 'anki', body: { action, version: 6, params } });
+      if (d.error && !('result' in d) && /fetch/i.test(d.error)) throw new Error('Anki injoignable : ouvre Anki (avec AnkiConnect).');
+    } else {
+      let r;
+      try {
+        r = await _fetch(ANKI_URL, { method: 'POST', body: JSON.stringify({ action, version: 6, params }) });
+      } catch {
+        throw new Error("Anki injoignable : ouvre Anki et ajoute « " + location.origin + " » dans webCorsOriginList d'AnkiConnect (ou installe l'extension)");
+      }
+      d = await r.json();
     }
-    const d = await r.json();
     if (d.error) throw new Error(d.error);
     return d.result;
+  }
+
+  /* ---------- Sous-titres -> phrases (même logique que server.js) ---------- */
+  function parseJson3(txt) {
+    const cues = [];
+    for (const ev of (JSON.parse(txt).events || [])) {
+      if (!ev.segs) continue;
+      const text = ev.segs.map(s => s.utf8 || '').join('').replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      cues.push({ start: ev.tStartMs / 1000, end: (ev.tStartMs + (ev.dDurationMs || 0)) / 1000, text });
+    }
+    for (let i = 0; i < cues.length - 1; i++) if (cues[i].end > cues[i + 1].start) cues[i].end = cues[i + 1].start;
+    return cues;
+  }
+  function mergeSentences(cues) {
+    const out = [];
+    let cur = null;
+    for (let i = 0; i < cues.length; i++) {
+      const c = cues[i];
+      if (!cur) cur = { start: c.start, end: c.end, text: c.text };
+      else { cur.text += ' ' + c.text; cur.end = c.end; }
+      const next = cues[i + 1];
+      const gap = next ? next.start - c.end : 99;
+      const done = /[.!?…]["')\]]?$/.test(cur.text) || cur.text.length > 90 || gap > 2.5
+        || (cur.text.length > 60 && /[,;:]$/.test(cur.text));
+      if (done) { out.push(cur); cur = null; }
+    }
+    if (cur) out.push(cur);
+    return out.map(s => ({ start: Math.round(s.start * 100) / 100, end: Math.round(s.end * 100) / 100, text: s.text }));
+  }
+  function wordTimeline(txt) { // sous-titres auto : horodatage de chaque mot
+    const times = [];
+    for (const ev of (JSON.parse(txt).events || [])) {
+      for (const seg of (ev.segs || [])) if ((seg.utf8 || '').trim()) times.push((ev.tStartMs + (seg.tOffsetMs || 0)) / 1000);
+    }
+    return times.sort((a, b) => a - b);
+  }
+  function refineAudioBounds(sentences, words) {
+    if (!words.length) return;
+    for (let i = 0; i < sentences.length; i++) {
+      const s = sentences[i], next = sentences[i + 1];
+      const first = words.find(t => t >= s.start - 0.3);
+      const nextFirst = next ? words.find(t => t >= next.start - 0.1) : null;
+      const a = Math.max(0, (first != null ? first : s.start) - 0.2);
+      let b = nextFirst != null ? Math.min(nextFirst - 0.05, s.end + 0.35) : s.end + 0.35;
+      if (b < a + 0.4) b = a + 0.4;
+      s.audioStart = Math.round(a * 100) / 100;
+      s.audioEnd = Math.round(b * 100) / 100;
+    }
+  }
+
+  // Ouvre la vidéo dans un petit lecteur invisible, sous-titres anglais activés : le lecteur
+  // télécharge les sous-titres et l'extension (yt-hook.js) nous les transmet.
+  async function liveMeta(id) {
+    for (let i = 0; !(window.YT && window.YT.Player) && i < 100; i++) await new Promise(r => setTimeout(r, 100));
+    if (!(window.YT && window.YT.Player)) throw new Error('Lecteur YouTube indisponible');
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;right:0;bottom:0;width:320px;height:180px;opacity:0.01;pointer-events:none;z-index:-1';
+    host.appendChild(document.createElement('div'));
+    document.body.appendChild(host);
+    let player, onMsg, timer;
+    try {
+      const subs = new Promise((resolve, reject) => {
+        onMsg = e => {
+          const d = e.data;
+          if (!d || d.source !== 'ei-yt' || d.videoId !== id || !/^en/.test(d.lang)) return;
+          try { if ((JSON.parse(d.text).events || []).length) resolve(d); } catch {}
+        };
+        window.addEventListener('message', onMsg);
+        timer = setTimeout(() => reject(new Error('pas de sous-titres anglais')), 20000);
+      });
+      const ready = new Promise(resolve => {
+        player = new YT.Player(host.firstChild, {
+          videoId: id, width: 320, height: 180,
+          playerVars: { autoplay: 1, mute: 1, controls: 0, cc_load_policy: 1, cc_lang_pref: 'en', hl: 'en' },
+          events: { onReady: e => {
+            e.target.mute(); e.target.playVideo();
+            try { e.target.loadModule('captions'); e.target.setOption('captions', 'track', { languageCode: 'en' }); } catch {}
+            resolve();
+          } }
+        });
+      });
+      const [d] = await Promise.all([subs, ready]);
+      const sentences = mergeSentences(parseJson3(d.text));
+      if (d.kind === 'asr') refineAudioBounds(sentences, wordTimeline(d.text));
+      const info = player.getVideoData ? player.getVideoData() : {};
+      return { id, title: info.title || id, channel: info.author || '', duration: player.getDuration ? player.getDuration() : 0, sentences, live: true };
+    } finally {
+      clearTimeout(timer);
+      window.removeEventListener('message', onMsg);
+      try { player && player.destroy(); } catch {}
+      host.remove();
+    }
   }
 
   // Mêmes modèles de cartes que server.js (ensureAnki) — garder les deux alignés.
@@ -88,15 +207,51 @@ img { max-width: 100%; border-radius: 12px; }
     catch (e) { if (/duplicate/i.test(e.message)) return { noteId: null, duplicate: true }; throw e; }
   }
 
+  const metas = new Map(); // id -> meta déjà chargée (préparée ou lue en direct)
   async function videoMeta(id) {
     if (!/^[A-Za-z0-9_-]{11}$/.test(id)) throw new Error('Lien YouTube invalide');
+    if (metas.has(id)) return metas.get(id);
     // no-store : GitHub Pages met les 404 en cache 10 min, la vidéo doit apparaître dès qu'elle est prête.
     const r = await _fetch(`videos/${id}.json?t=${Date.now()}`, { cache: 'no-store' });
-    if (!r.ok) {
-      setTimeout(() => offerPrepare(id), 500); // après l'affichage du message d'erreur par app.js
-      throw new Error("Cette vidéo n'est pas encore prête : il faut la préparer une fois sur GitHub (2 à 3 minutes).");
+    if (r.ok) { const m = await r.json(); metas.set(id, m); return m; }
+    let why = '';
+    if (hasExt()) {
+      try { const m = await liveMeta(id); metas.set(id, m); return m; }
+      catch (e) { why = ` (extension : ${e.message})`; }
     }
-    return r.json();
+    setTimeout(() => offerPrepare(id), 500); // après l'affichage du message d'erreur par app.js
+    throw new Error("Cette vidéo n'est pas encore prête : il faut la préparer une fois sur GitHub (2 à 3 minutes)." + why);
+  }
+
+  // Capture en direct (vidéo non préparée) : on rejoue la phrase et l'extension enregistre
+  // l'image et le son de l'onglet.
+  async function liveCapture(videoId, s) {
+    const st = await extCall({ type: 'status' });
+    if (!st.on) throw new Error("clique une fois sur l'icône de l'extension Écoute Intelligente (en haut à droite de Chrome) pour autoriser l'image et le son, puis recapture");
+    const p = ytPlayer;
+    const from = s.audioStart != null ? s.audioStart : Math.max(0, s.start - 0.25);
+    const to = s.audioEnd != null ? s.audioEnd : s.end + 0.15;
+    const btn = document.getElementById('btn-capture');
+    btn.style.visibility = 'hidden'; // sinon il apparaît sur l'image
+    try {
+      p.seekTo(Math.max(0, from - 0.1), true);
+      p.playVideo();
+      for (let i = 0; i < 50 && !(p.getPlayerState() === 1 && p.getCurrentTime() >= from - 0.3); i++) await new Promise(r => setTimeout(r, 100));
+      const cur = p.getCurrentTime();
+      const box = document.querySelector('.yt-wrap').getBoundingClientRect();
+      const res = await extCall({
+        type: 'record',
+        durationMs: Math.max(500, (to - cur) * 1000),
+        frameAtMs: ((s.start + s.end) / 2 - cur) * 1000,
+        rect: { x: box.x, y: box.y, width: box.width, height: box.height },
+        viewport: { width: window.innerWidth, height: window.innerHeight }
+      });
+      if (res.error === 'inactive') throw new Error("la capture a été coupée : reclique sur l'icône de l'extension");
+      if (res.error) throw new Error(res.error);
+      return res;
+    } finally {
+      btn.style.visibility = '';
+    }
   }
 
   // Vidéo pas encore prête. Avec le jeton GitHub du propriétaire (collé une fois, gardé dans ce
@@ -204,6 +359,7 @@ img { max-width: 100%; border-radius: 12px; }
   const media = (id, ms, ext) => new URL(`videos/${id}/${ms}.${ext}`, location.href).href;
   // Médias des cartes : servis par le site (même nom que dans Anki : EI-<id>-<ms>.jpg|mp3).
   window.EI_MEDIA_URL = name => {
+    if (/^(data|https?):/.test(name)) return name; // galerie : déjà une adresse complète
     const m = String(name).match(/^EI-([A-Za-z0-9_-]{11})-(\d+)\.(jpg|mp3)$/);
     return m ? media(m[1], m[2], m[3]) : '';
   };
@@ -223,6 +379,17 @@ img { max-width: 100%; border-radius: 12px; }
         await ensureAnki();
         const ms = Math.round(start * 1000);
         const t = Math.floor(start);
+        const meta = metas.get(videoId) || await videoMeta(videoId);
+        let picture = [{ url: media(videoId, ms, 'jpg'), filename: `EI-${videoId}-${ms}.jpg`, fields: ['Image'] }];
+        let audio = [{ url: media(videoId, ms, 'mp3'), filename: `EI-${videoId}-${ms}.mp3`, fields: ['Audio'] }];
+        let image = media(videoId, ms, 'jpg');
+        if (meta.live) {
+          const s = meta.sentences.find(x => Math.abs(x.start - start) < 0.05) || { start, end: body.end };
+          const rec = await liveCapture(videoId, s);
+          picture = [{ data: rec.image, filename: `EI-${videoId}-${ms}.jpg`, fields: ['Image'] }];
+          audio = [{ data: rec.audio, filename: `EI-${videoId}-${ms}.webm`, fields: ['Audio'] }];
+          image = 'data:image/jpeg;base64,' + rec.image;
+        }
         const res = await addNote({
           deckName: DECK_PHRASES, modelName: MODEL_PHRASE,
           fields: { Image: '', Audio: '', Text: esc(text), Translation: esc(translation),
@@ -230,10 +397,9 @@ img { max-width: 100%; border-radius: 12px; }
             Url: `https://www.youtube.com/watch?v=${videoId}&t=${t}s` },
           tags: ['ecoute-intelligente'],
           options: { allowDuplicate: false, duplicateScope: 'deck' },
-          picture: [{ url: media(videoId, ms, 'jpg'), filename: `EI-${videoId}-${ms}.jpg`, fields: ['Image'] }],
-          audio: [{ url: media(videoId, ms, 'mp3'), filename: `EI-${videoId}-${ms}.mp3`, fields: ['Audio'] }]
+          picture, audio
         });
-        return { ...res, image: media(videoId, ms, 'jpg') };
+        return { ...res, image };
       }
       case 'word': {
         const { word, phonetic, definition, translation, example, videoTitle } = body;
@@ -269,11 +435,19 @@ img { max-width: 100%; border-radius: 12px; }
         };
         const [phrases, mots] = await Promise.all([deck(DECK_PHRASES), deck(DECK_MOTS)]);
         const f = (n, k) => (n.fields[k] ? n.fields[k].value : '');
+        const TYPES = { jpg: 'image/jpeg', mp3: 'audio/mpeg', webm: 'audio/webm' };
+        const fromAnki = async name => {
+          if (!name) return '';
+          try {
+            const b64 = await anki('retrieveMediaFile', { filename: name });
+            return b64 ? `data:${TYPES[name.split('.').pop()] || 'application/octet-stream'};base64,${b64}` : '';
+          } catch { return ''; }
+        };
         return {
-          phrases: phrases.map(n => ({ id: n.noteId, text: f(n, 'Text'), translation: f(n, 'Translation'),
+          phrases: await Promise.all(phrases.map(async n => ({ id: n.noteId, text: f(n, 'Text'), translation: f(n, 'Translation'),
             source: f(n, 'Source'), url: f(n, 'Url'),
-            image: (f(n, 'Image').match(/src="([^"]+)"/) || [])[1] || '',
-            audio: (f(n, 'Audio').match(/\[sound:([^\]]+)\]/) || [])[1] || '' })),
+            image: await fromAnki((f(n, 'Image').match(/src="([^"]+)"/) || [])[1]),
+            audio: await fromAnki((f(n, 'Audio').match(/\[sound:([^\]]+)\]/) || [])[1]) }))),
           mots: mots.map(n => ({ id: n.noteId, word: f(n, 'Word'), phonetic: f(n, 'Phonetic'),
             definition: f(n, 'Definition'), translation: f(n, 'Translation'), example: f(n, 'Example'), source: f(n, 'Source') }))
         };
@@ -282,7 +456,7 @@ img { max-width: 100%; border-radius: 12px; }
         const vid = decodeURIComponent(arg);
         try {
           const ids = await anki('findNotes', { query: `"deck:${DECK_PHRASES}" "Audio:*EI-${vid}-*"` });
-          const re = new RegExp(`EI-${vid}-(\\d+)\\.mp3`);
+          const re = new RegExp(`EI-${vid}-(\\d+)\\.(mp3|webm)`, 'i'); // Anki peut passer les noms en minuscules
           const starts = ids.length ? (await anki('notesInfo', { notes: ids }))
             .map(n => (((n.fields.Audio || {}).value || '').match(re) || [])[1]).filter(Boolean).map(s => +s / 1000) : [];
           return { ok: true, starts };
@@ -318,6 +492,21 @@ img { max-width: 100%; border-radius: 12px; }
 
   // Accueil : liste des vidéos déjà préparées, à ouvrir d'un clic.
   document.addEventListener('DOMContentLoaded', async () => {
+    if (!hasExt()) {
+      const form = document.getElementById('url-form');
+      const tip = document.createElement('details');
+      tip.className = 'today-card';
+      tip.style.cssText = 'display:block;margin:-1.4rem 0 2rem;font-size:13.5px;color:var(--text2);line-height:1.6';
+      tip.innerHTML = `<summary style="cursor:pointer;color:var(--text)"><span class="ms" style="color:var(--accent)">extension</span>
+          <b>Ouvre n'importe quelle vidéo instantanément</b> avec l'extension Chrome</summary>
+        <ol style="margin:10px 0 4px 20px">
+          <li><a href="ecoute-intelligente-extension.zip" download>Télécharge l'extension</a> et décompresse le fichier .zip</li>
+          <li>Ouvre <b>chrome://extensions</b> et active le <b>Mode développeur</b> (en haut à droite)</li>
+          <li>Clique <b>Charger l'extension non empaquetée</b> et choisis le dossier décompressé</li>
+          <li>Recharge cette page. Pour capturer image et son, clique une fois sur l'icône de l'extension</li>
+        </ol>`;
+      form.after(tip);
+    }
     let list = [];
     try { list = await (await _fetch('videos/index.json')).json(); } catch { return; }
     const recent = document.getElementById('recent-section');

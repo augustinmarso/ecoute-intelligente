@@ -75,6 +75,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - name: Paquet de l'extension Chrome (téléchargeable depuis le site)
+        run: cd extension && zip -qr ../public/ecoute-intelligente-extension.zip .
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
