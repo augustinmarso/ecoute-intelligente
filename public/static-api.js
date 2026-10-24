@@ -99,32 +99,106 @@ img { max-width: 100%; border-radius: 12px; }
     return r.json();
   }
 
-  // Bouton « Préparer » : ouvre une issue pré-remplie (le workflow « Site » la traite, réservé au
-  // propriétaire du dépôt), puis le site guette la vidéo et l'ouvre dès qu'elle est en ligne.
-  let poll = null;
+  // Vidéo pas encore prête. Avec le jeton GitHub du propriétaire (collé une fois, gardé dans ce
+  // navigateur), le site lance lui-même la préparation (workflow « Site »). Sans jeton : bouton qui
+  // ouvre une issue pré-remplie. Dans les deux cas, le site guette la vidéo et l'ouvre dès qu'elle est en ligne.
+  const TOKEN_KEY = 'ei-gh-token';
+  const DISPATCH = 'https://api.github.com/repos/augustinmarso/ecoute-intelligente/actions/workflows/site.yml/dispatches';
+  const TOKEN_NEW = 'https://github.com/settings/personal-access-tokens/new?name=' + encodeURIComponent('Écoute Intelligente') +
+    '&description=' + encodeURIComponent('Préparation automatique des vidéos') + '&expires_in=none';
+  const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } };
+  let poll = null, tick = null;
+
+  async function dispatch(id, token) {
+    const r = await _fetch(DISPATCH, {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json' },
+      body: JSON.stringify({ ref: 'main', inputs: { video: 'https://www.youtube.com/watch?v=' + id } })
+    });
+    if (r.status === 401 || r.status === 403 || r.status === 404) {
+      try { localStorage.removeItem(TOKEN_KEY); } catch {}
+      throw new Error('Jeton GitHub refusé (expiré, ou sans le droit « Actions : lecture et écriture » sur ecoute-intelligente).');
+    }
+    if (!r.ok) throw new Error('GitHub a refusé le lancement (' + r.status + ').');
+  }
+
+  // Remet l'écran d'erreur d'app.js dans son état d'origine (titre, icône, bouton Réessayer).
+  function resetBox(box) {
+    box.querySelector('h3').textContent = 'Impossible de charger cette vidéo';
+    box.querySelector('.ms').hidden = false;
+    document.getElementById('btn-retry').hidden = false;
+  }
+
+  function waitFor(id, box) {
+    clearInterval(poll);
+    poll = setInterval(async () => {
+      if (box.hidden) { clearInterval(poll); clearInterval(tick); return; } // l'utilisateur est parti ailleurs
+      try {
+        const r = await _fetch(`videos/${id}.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (r.ok) { clearInterval(poll); clearInterval(tick); resetBox(box); document.getElementById('btn-retry').click(); }
+      } catch {}
+    }, 10000);
+  }
+
   function offerPrepare(id) {
     const box = document.getElementById('player-error');
     if (!box || box.hidden) return;
     box.querySelector('.ei-prepare')?.remove();
-    clearInterval(poll);
-    const title = 'Préparer : https://www.youtube.com/watch?v=' + id;
-    const href = ISSUES + '?title=' + encodeURIComponent(title) +
-      '&body=' + encodeURIComponent('Valide cette issue (bouton « Create ») : la vidéo sera prête sur le site dans 2 à 3 minutes.');
+    clearInterval(tick);
     const div = document.createElement('div');
     div.className = 'ei-prepare';
-    div.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px';
-    div.innerHTML = `<a class="btn-main" style="height:40px;padding:0 22px;text-decoration:none" target="_blank" rel="noopener">
-        <span class="ms" style="font-size:18px">rocket_launch</span> Préparer cette vidéo sur GitHub</a>
-      <span style="font-size:12.5px;color:var(--text3)">Valide sur GitHub, puis reste ici : la vidéo s'ouvrira toute seule.</span>`;
-    div.querySelector('a').href = href;
+    div.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;width:100%;max-width:420px';
     box.querySelector('#btn-retry')?.before(div);
-    poll = setInterval(async () => {
-      if (box.hidden) return clearInterval(poll); // l'utilisateur est parti ailleurs
-      try {
-        const r = await _fetch(`videos/${id}.json?t=${Date.now()}`, { cache: 'no-store' });
-        if (r.ok) { clearInterval(poll); document.getElementById('btn-retry')?.click(); }
-      } catch {}
-    }, 15000);
+    const msg = document.getElementById('player-error-msg');
+    const retry = document.getElementById('btn-retry');
+
+    const token = getToken();
+    if (token) {
+      retry.hidden = true;
+      box.querySelector('.ms').hidden = true;
+      box.querySelector('h3').textContent = 'Préparation de la vidéo…';
+      msg.textContent = 'Première ouverture : GitHub récupère les sous-titres, les images et le son. La vidéo s’ouvrira toute seule.';
+      div.innerHTML = '<div class="spinner"></div><span class="ei-wait" style="font-size:13px;color:var(--text3)"></span>';
+      const t0 = Date.now();
+      const wait = div.querySelector('.ei-wait');
+      const show = () => { const s = Math.round((Date.now() - t0) / 1000); wait.textContent = `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s — environ 2 min en tout`; };
+      show(); tick = setInterval(show, 1000);
+      dispatch(id, token).then(() => waitFor(id, box)).catch(e => {
+        clearInterval(tick);
+        div.remove();
+        offerPrepare(id); // jeton effacé : repropose le bouton et le champ du jeton
+        box.querySelector('h3').textContent = 'Impossible de lancer la préparation';
+        msg.textContent = e.message;
+      });
+      return;
+    }
+
+    resetBox(box);
+    const title = 'Préparer : https://www.youtube.com/watch?v=' + id;
+    div.innerHTML = `<a class="btn-main ei-issue" style="height:40px;padding:0 22px;text-decoration:none" target="_blank" rel="noopener">
+        <span class="ms" style="font-size:18px">rocket_launch</span> Préparer cette vidéo sur GitHub</a>
+      <details style="width:100%;font-size:12.5px;color:var(--text2);text-align:left">
+        <summary style="cursor:pointer;text-align:center;color:var(--text3)">Préparation automatique (propriétaire du dépôt)</summary>
+        <p style="margin:10px 0 8px;line-height:1.5">Crée un <a class="ei-tok" target="_blank" rel="noopener">jeton GitHub</a> :
+          « Only select repositories » → <b>ecoute-intelligente</b>, puis « Repository permissions » → <b>Actions : Read and write</b>.
+          Colle-le ici une fois : il reste dans ce navigateur, et chaque nouveau lien se prépare tout seul.</p>
+        <form style="display:flex;gap:6px">
+          <input type="password" autocomplete="off" placeholder="github_pat_…" aria-label="Jeton GitHub"
+            style="flex:1;min-width:0;height:36px;padding:0 12px;border:none;border-radius:999px;background:var(--bg2);color:var(--text);box-shadow:inset 0 0 0 1px var(--border2)"/>
+          <button class="btn-main" type="submit">Enregistrer</button>
+        </form>
+      </details>`;
+    div.querySelector('.ei-issue').href = ISSUES + '?title=' + encodeURIComponent(title) +
+      '&body=' + encodeURIComponent('Valide cette issue (bouton « Create ») : la vidéo sera prête sur le site dans 2 à 3 minutes.');
+    div.querySelector('.ei-tok').href = TOKEN_NEW;
+    div.querySelector('form').addEventListener('submit', e => {
+      e.preventDefault();
+      const v = div.querySelector('input').value.trim();
+      if (!v) return;
+      try { localStorage.setItem(TOKEN_KEY, v); } catch {}
+      offerPrepare(id); // relance avec le jeton
+    });
+    waitFor(id, box);
   }
 
   const media = (id, ms, ext) => new URL(`videos/${id}/${ms}.${ext}`, location.href).href;
