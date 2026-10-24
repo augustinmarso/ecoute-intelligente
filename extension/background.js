@@ -9,6 +9,36 @@ const EI_FILE = /^_?ei-[\w.-]+$/i;
 const SITE_MEDIA = /^https:\/\/augustinmarso\.github\.io\/ecoute-intelligente\/videos\//;
 const FONT_URL = /^https:\/\/cdn\.jsdelivr\.net\/npm\/@fontsource\//;
 const READ_ONLY = new Set(['version', 'modelNames', 'findNotes', 'findCards', 'notesInfo']);
+// HTML qu'Anki exécuterait dans ses cartes (script, gestionnaires d'événement, javascript:).
+const ACTIVE_HTML = /<\s*(script|iframe|object|embed|meta|base|link)\b|<[^>]*\bon[a-z]+\s*=|javascript:/i;
+
+// Modèles de cartes : définis ICI, jamais repris de la page (mêmes gabarits que server.js et
+// public/static-api.js — garder les trois alignés).
+const CARD_CSS = `
+@font-face { font-family: "EIAtkinson"; src: url("_ei-atkinson-400.woff2"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "EIAtkinson"; src: url("_ei-atkinson-700.woff2"); font-weight: 700; font-style: normal; }
+.card { font-family: "EIAtkinson", "Atkinson Hyperlegible", "Segoe UI", Arial, sans-serif;
+  font-size: 21px; line-height: 1.55; letter-spacing: .01em; text-align: center;
+  color: #2A2520; background: #FBF8F2; padding: 12px; }
+img { max-width: 100%; border-radius: 12px; }
+.ei-text { font-size: 22px; margin: 14px 0 6px; }
+.ei-trad { color: #6F665A; font-size: 18px; }
+.ei-src { color: #9C8F78; font-size: 13px; margin-top: 14px; }
+.ei-word { font-size: 30px; color: #C0603A; font-weight: bold; }
+.ei-phon { color: #9C8F78; font-size: 16px; }
+.ei-def { text-align: left; font-size: 17px; margin: 10px 0; }
+.ei-ex { color: #6F665A; font-style: italic; font-size: 16px; }`;
+const MODELS = {
+  'EI Phrase': { inOrderFields: ['Image', 'Audio', 'Text', 'Translation', 'Source', 'Url'], cardTemplates: [{ Name: 'Écoute',
+    Front: '<div class="ei-text">{{Translation}}</div>{{Image}}',
+    Back: '{{FrontSide}}<hr id="answer">{{Audio}}<div class="ei-text">{{Text}}</div><div class="ei-src">{{Source}}</div>' }] },
+  'EI Mot': { inOrderFields: ['Word', 'Phonetic', 'Definition', 'Translation', 'Example', 'Source'], cardTemplates: [{ Name: 'Mot',
+    Front: '<div class="ei-word">{{Word}}</div><div class="ei-phon">{{Phonetic}}</div>',
+    Back: '{{FrontSide}}<hr id="answer"><div class="ei-trad" style="font-size:24px;font-style:normal">{{Translation}}</div><div class="ei-src">{{Source}}</div>' }] },
+  'EI Phrase générée': { inOrderFields: ['Fr', 'En', 'Source'], cardTemplates: [{ Name: 'Thème',
+    Front: '<div class="ei-text">{{Fr}}</div>',
+    Back: '{{FrontSide}}<hr id="answer"><div class="ei-text">{{En}}</div><div class="ei-src">{{Source}}</div>' }] }
+};
 
 async function ankiRaw(action, params = {}) {
   const r = await fetch(ANKI, { method: 'POST', body: JSON.stringify({ action, version: 6, params }) });
@@ -20,19 +50,33 @@ async function ankiSafe(body) {
   const refuse = why => ({ result: null, error: `Action Anki refusée (${action}) : ${why}` });
   if (READ_ONLY.has(action)) {
     const d = await ankiRaw(action, p);
+    // Résultats limités aux cartes de l'app : une recherche libre ne révèle rien du reste d'Anki.
     if (action === 'notesInfo' && Array.isArray(d.result)) d.result = d.result.filter(n => EI_MODEL.test(n.modelName || ''));
+    if (action === 'findNotes' && Array.isArray(d.result) && d.result.length) {
+      const infos = (await ankiRaw('notesInfo', { notes: d.result })).result || [];
+      d.result = infos.filter(n => EI_MODEL.test(n.modelName || '')).map(n => n.noteId);
+    }
+    if (action === 'findCards' && Array.isArray(d.result) && d.result.length) {
+      const infos = (await ankiRaw('cardsInfo', { cards: d.result })).result || [];
+      d.result = infos.filter(c => EI_DECK.test((c.deckName || '') + '::') || EI_MODEL.test(c.modelName || '')).map(c => c.cardId);
+    }
     return d;
   }
   switch (action) {
     case 'createDeck': if (!EI_DECK.test(p.deck || '')) return refuse('deck'); break;
-    case 'createModel': if (!EI_MODEL.test(p.modelName || '')) return refuse('modèle'); break;
+    case 'createModel': {
+      const m = MODELS[p.modelName];
+      if (!m) return refuse('modèle');
+      return ankiRaw('createModel', { modelName: p.modelName, css: CARD_CSS, ...m });
+    }
     case 'retrieveMediaFile': if (!EI_FILE.test(p.filename || '')) return refuse('fichier'); break;
     case 'storeMediaFile':
       if (!EI_FILE.test(p.filename || '') || p.path || (p.url && !FONT_URL.test(p.url))) return refuse('fichier');
       break;
     case 'addNote': {
       const n = p.note || {};
-      if (!EI_DECK.test(n.deckName || '') || !EI_MODEL.test(n.modelName || '')) return refuse('deck');
+      if (!EI_DECK.test(n.deckName || '') || !MODELS[n.modelName]) return refuse('deck');
+      if (Object.values(n.fields || {}).some(v => ACTIVE_HTML.test(String(v)))) return refuse('contenu');
       const files = [...(n.picture || []), ...(n.audio || []), ...(n.video || [])];
       if (files.some(f => f.path || !EI_FILE.test(f.filename || '') || (f.url && !SITE_MEDIA.test(f.url)))) return refuse('média');
       break;
