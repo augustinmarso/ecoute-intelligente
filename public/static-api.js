@@ -123,6 +123,8 @@
     try {
       const subs = new Promise((resolve, reject) => {
         onMsg = e => {
+          // Uniquement le lecteur invisible ouvert ici (pas une autre fenêtre qui imiterait le message).
+          if (!/^https:\/\/www\.youtube(-nocookie)?\.com$/.test(e.origin) || !player || e.source !== player.getIframe().contentWindow) return;
           const d = e.data;
           if (!d || d.source !== 'ei-yt' || d.videoId !== id || !/^en/.test(d.lang)) return;
           try { if ((JSON.parse(d.text).events || []).length) resolve(d); } catch {}

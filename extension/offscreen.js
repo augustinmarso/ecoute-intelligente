@@ -1,8 +1,9 @@
 // Document invisible qui tient le flux de l'onglet (image + son) et enregistre à la demande.
 let stream = null, tabId = null, ctx = null, video = null;
 
-chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
-  if (!msg || msg.target !== 'offscreen') return;
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  // Uniquement le service de l'extension (jamais un script de page : sender.tab).
+  if (!msg || msg.target !== 'offscreen' || sender.id !== chrome.runtime.id || sender.tab) return;
   handle(msg).then(reply, e => reply({ error: e.message }));
   return true;
 });

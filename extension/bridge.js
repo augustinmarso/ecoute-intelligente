@@ -4,9 +4,14 @@ document.documentElement.dataset.eiExt = chrome.runtime.getManifest().version;
 
 window.addEventListener('message', async e => {
   if (e.source !== window || !e.data || e.data.source !== 'ei-page') return;
+  // Seuls ces trois types passent, sans champ « target » (réservé au service de l'extension).
+  const { target, ...msg } = e.data.msg || {};
   let res;
-  try { res = await chrome.runtime.sendMessage(e.data.msg); }
-  catch (err) { res = { error: err.message }; }
+  if (!['anki', 'status', 'record'].includes(msg.type)) res = { error: 'type refusé' };
+  else {
+    try { res = await chrome.runtime.sendMessage(msg); }
+    catch (err) { res = { error: err.message }; }
+  }
   window.postMessage({ source: 'ei-ext', id: e.data.id, res }, location.origin);
 });
 
