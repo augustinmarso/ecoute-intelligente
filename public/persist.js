@@ -16,6 +16,7 @@
 // =============================================================
 
 (function () {
+  if (window.EI_STATIC) return; // version en ligne : pas de store disque
   var EI = /^ei-/; // seules les clés de l'app sont persistées
 
   // --- 1. Hydratation (bloquante) ---

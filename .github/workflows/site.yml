@@ -34,7 +34,11 @@ jobs:
       - name: Préparer la vidéo
         env:
           VIDEO: ${{ inputs.video }}
-        run: node scripts/prepare-video.js "$VIDEO"
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          if [ -n "$YT_COOKIES" ]; then printf '%s
+' "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"; export YTDLP_COOKIES="$RUNNER_TEMP/cookies.txt"; fi
+          node scripts/prepare-video.js "$VIDEO"
       - name: Enregistrer dans le dépôt
         run: |
           git config user.name "github-actions[bot]"

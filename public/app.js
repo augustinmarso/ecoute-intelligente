@@ -86,6 +86,9 @@ const RECENT_MAX = 12;
  * Police de lecture (confort dyslexie) — 3 choix persistés
  * ------------------------------------------------------------- */
 
+// Médias des cartes : servis par le serveur local, ou par le site en ligne (static-api.js).
+const mediaUrl = name => (window.EI_MEDIA_URL && window.EI_MEDIA_URL(name)) || `/api/media/${encodeURIComponent(name)}`;
+
 const FONT_KEY = 'ei-font-v2'; // v2 : Scoutie Sans devient la police par défaut
 const FONT_OPTIONS = [
   { id: 'scoutie', family: "'Scoutie Sans', sans-serif", name: 'Scoutie Sans', desc: 'Police de l’app' },
@@ -1229,7 +1232,7 @@ function renderPhraseGrid(body, phrases) {
   body.innerHTML = `<div class="phrase-grid">${phrases.map(p => `
     <div class="phrase-card" data-card-id="${p.id}">
       <div class="phrase-thumb">
-        ${p.image ? `<img src="/api/media/${encodeURIComponent(p.image)}" alt="" loading="lazy"/>` : ''}
+        ${p.image ? `<img src="${mediaUrl(p.image)}" alt="" loading="lazy"/>` : ''}
         ${p.audio ? `<button class="phrase-play" data-audio="${escapeHtml(p.audio)}" title="Écouter">${icon('play_circle')}</button>` : ''}
         <button class="card-del" data-id="${p.id}" data-audio="${escapeHtml(p.audio || '')}" data-kind="phrases" title="Supprimer (aussi dans Anki)">${icon('delete', 17)}</button>
       </div>
@@ -1333,7 +1336,7 @@ function stopCardsAudio() {
 function toggleCardAudio(btn, filename) {
   if (cardsAudioBtn === btn) { stopCardsAudio(); return; }
   stopCardsAudio();
-  const audio = new Audio(`/api/media/${encodeURIComponent(filename)}`);
+  const audio = new Audio(mediaUrl(filename));
   cardsAudio = audio;
   cardsAudioBtn = btn;
   btn.innerHTML = icon('stop_circle');

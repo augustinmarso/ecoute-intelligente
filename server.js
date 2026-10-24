@@ -71,6 +71,8 @@ async function ytdlp(args, timeoutMs) {
     } catch {}
   }
   const base = YTDLP_JS_RUNTIME ? ['--js-runtimes', 'node'] : [];
+  // GitHub Actions : YouTube bloque ses serveurs sans cookies de connexion (secret YT_COOKIES).
+  if (process.env.YTDLP_COOKIES) base.push('--cookies', process.env.YTDLP_COOKIES);
   return run(YTDLP[0], [...YTDLP.slice(1), ...base, ...args], timeoutMs);
 }
 
