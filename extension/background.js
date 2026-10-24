@@ -9,8 +9,8 @@ const EI_FILE = /^_?ei-[\w.-]+$/i;
 const SITE_MEDIA = /^https:\/\/augustinmarso\.github\.io\/ecoute-intelligente\/videos\//;
 const FONT_URL = /^https:\/\/cdn\.jsdelivr\.net\/npm\/@fontsource\//;
 const READ_ONLY = new Set(['version', 'modelNames', 'findNotes', 'findCards', 'notesInfo']);
-// HTML qu'Anki exécuterait dans ses cartes (script, gestionnaires d'événement, javascript:).
-const ACTIVE_HTML = /<\s*(script|iframe|object|embed|meta|base|link)\b|<[^>]*\bon[a-z]+\s*=|javascript:/i;
+// Aucune balise dans les champs : le site échappe tout son texte et Anki insère lui-même image et son.
+const HAS_TAG = /</;
 
 // Modèles de cartes : définis ICI, jamais repris de la page (mêmes gabarits que server.js et
 // public/static-api.js — garder les trois alignés).
@@ -76,7 +76,7 @@ async function ankiSafe(body) {
     case 'addNote': {
       const n = p.note || {};
       if (!EI_DECK.test(n.deckName || '') || !MODELS[n.modelName]) return refuse('deck');
-      if (Object.values(n.fields || {}).some(v => ACTIVE_HTML.test(String(v)))) return refuse('contenu');
+      if (Object.values(n.fields || {}).some(v => HAS_TAG.test(String(v)))) return refuse('contenu');
       const files = [...(n.picture || []), ...(n.audio || []), ...(n.video || [])];
       if (files.some(f => f.path || !EI_FILE.test(f.filename || '') || (f.url && !SITE_MEDIA.test(f.url)))) return refuse('média');
       break;
