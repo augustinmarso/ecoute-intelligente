@@ -93,7 +93,7 @@ img { max-width: 100%; border-radius: 12px; }
     // no-store : GitHub Pages met les 404 en cache 10 min, la vidéo doit apparaître dès qu'elle est prête.
     const r = await _fetch(`videos/${id}.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!r.ok) {
-      setTimeout(() => offerPrepare(id));
+      setTimeout(() => offerPrepare(id), 500); // après l'affichage du message d'erreur par app.js
       throw new Error("Cette vidéo n'est pas encore prête : il faut la préparer une fois sur GitHub (2 à 3 minutes).");
     }
     return r.json();
